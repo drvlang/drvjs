@@ -15,6 +15,8 @@ only through them are omitted from the installed tree.
 For repeated CI builds, `--cache-packages` also gives each extracted package and
 patched variant a separate reusable Nix output. Final tree assembly remains one
 derivation per exported selection.
+`--cache-dependencies` caches the complete installation separately from workspace
+sources, reducing rebuild work and binary-cache downloads after source edits.
 
 ## Try it
 
@@ -181,6 +183,51 @@ uses the same selection. The exported inputs and original checkout are unchanged
 `tests/platforms.py` covers all assembly modes, optional descendants, shared and
 required packages, peer contexts, explicit architectures, integrity checks, and
 pnpm parity.
+
+### Installed dependency cache for CI
+
+Use `--cache-dependencies` when many source revisions share the same dependency
+graph:
+
+```sh
+drvjs export -C /path/to/project --filter my-app --cache-dependencies -o /tmp/ci-deps
+nix-build /tmp/ci-deps -o result
+# Or enable it for an existing current-version export:
+nix-build /tmp/ci-deps --arg cacheDependencies true -o result
+```
+
+The result remains a complete workspace with normal pnpm links, package files,
+source files, and runnable bins. An intermediate `dependencies` derivation keeps
+only the inputs assembly reads: projected manifests and lockfile, configuration,
+hooks, patches, and existing workspace bin files. Other source files and new
+source directories do not change its identity. Manifest, configuration,
+dependency, patch, or bin changes rebuild the layer.
+
+Final attachment validates those inputs, copies the installed packages alongside
+the selected sources, and relocates generated bin shims and metadata to the new
+root. Relative workspace and peer links retain their meaning. No package files
+are stripped, and the final output does not retain the layer in its runtime
+closure. Independent verification checks the attached workspace against pnpm.
+
+Keep or publish the layer itself so subsequent CI workers can substitute it:
+
+```sh
+nix-build /tmp/ci-deps -A dependencies -o dependency-cache
+# Example local binary cache; use your CI cache's destination instead:
+nix copy --to 'file:///tmp/drvjs-cache?compression=zstd&compression-level=3' ./dependency-cache
+```
+
+Caching only `result` does not retain this build input. The intermediate layer is
+an installation cache; its workspace source files are intentionally incomplete.
+Use the normal final output to run the application or perform independent
+verification, especially when hooks load additional source files.
+
+This option trades an extra stored installation and first-time attachment for
+less work on source updates and fewer, smaller compressed build inputs. The
+uncompressed input closure grows; the final output size stays the same. It is
+opt-in because initial builds and small projects may not benefit. It can be
+combined with `--cache-packages` to reuse extraction after dependency changes;
+retained verification stores, zstd archives, and external stores also work.
 
 ### Package contents cache for CI
 
@@ -362,7 +409,12 @@ using up to four workers by default. `DRVJS_JOBS` requests a different worker co
 bounded by `NIX_BUILD_CORES` when set or available parallelism otherwise. Every
 download still passes SRI verification before import, and imported paths must
 match the original fixed-output paths. This changes `drvjs fetch`, not Nix's own
-fetcher or the assembly layout.
+fetcher or the assembly layout. Current exports use the same target reachability
+as Nix assembly, including explicitly requested `supportedArchitectures`. The
+default target is the current Linux host; use `--system aarch64-linux` to prepare
+another declared target or `--all-platforms` to populate every platform's cache.
+`--all` still controls public versus private registries independently. Old exports
+without target metadata retain their original all-platform behavior.
 
 `benchmarks/fetch.mjs` compares two binaries on identical exported package plans:
 
@@ -465,6 +517,79 @@ not require building Node or pnpm.
 existing project and tarball-manifest inputs. Downloads, export and Nix
 realization overhead should be measured separately. When comparing against an
 older native assembler, pass `--baseline-arg=--native`.
+
+### Further assembly and transfer improvements
+
+The [2026-11-14 measurements](benchmarks/assembly-transfer-2026-11-14.json)
+compare commit `6863c43` with reusable hoist matchers, fewer link syscalls,
+largest-first archive scheduling, and a release profile using thin LTO and one
+codegen unit. These optimizations are enabled by default. The profile trades
+longer helper compilation for a smaller, faster executable. The optional installed
+dependency cache adds a separate path for source updates.
+
+On the same pinned Vue checkout and x86_64-linux i7-1280P, seven alternating warm
+`nix-build --check` trials per mode produced these medians:
+
+| Selection | Previous direct | Current direct | Cached dependency layer |
+|---|---:|---:|---:|
+| Compiler-sfc subset | 0.481 s | 0.480 s | 0.452 s |
+| Compiler-sfc plus root CI tools | 1.493 s | 1.435 s | 1.234 s |
+| Full workspace | 1.817 s | 1.725 s | 1.581 s |
+
+The default path improves the larger selections by about 4–5%; the small selection
+is essentially unchanged. Layer reuse improves these warm rebuilds by about 6–17%.
+Tools, downloads, and layer preparation are excluded; evaluation, assembly, NAR
+checking, and daemon overhead are included. All 63 forced rebuilds passed
+reproducibility checks. These are local measurements, not remote-network timings.
+
+Seven ordinary CI source-edit rebuilds measured **2.706 s before, 2.705 s with
+the current direct path, and 2.454 s with the layer**: about 9% faster with layer
+reuse, and essentially unchanged without it. Assembler-only medians fell from
+about **0.292 s to 0.262 s**; attaching an existing layer took about **0.114 s**.
+Nix import and registration work limits the end-to-end gain. In three fresh
+builds with tools and archives cached, preparing and attaching a new layer took
+**4.29 s versus 2.50 s** for direct assembly. Repeated reuse, rather than initial
+preparation, is the reason to enable this option.
+
+For the CI subset, the layer reduces the compressed assembly input closure from
+**96.2 MB across 624 store paths to 66.7 MB across 9 paths**, at zstd level 3.
+The uncompressed input closure grows from about **136.6 MB to 287.2 MB** because
+the layer contains extracted files. Final output NAR size stays **233.54 MB**;
+the package contents, workspace sources, and link layout are preserved. Keep the
+layer in the CI binary cache to obtain the transfer benefit.
+
+Target-aware host prefetch also reduces full-Vue downloads from **741 archives /
+432.09 MB to 635 archives / 100.93 MB** on x86_64 Linux, about 77% fewer archive
+bytes. Those counts include an empty host cache and preserve every archive
+selected by the exported target graph. Tarballs whose missing platform metadata
+is learned only during assembly still require an initial fetch.
+
+To reduce transfers of the final output itself, a cache can use stronger
+compression without changing installed files. Three alternating publications of
+the CI result into fresh local file caches measured:
+
+| zstd level | Compressed output | Publication time |
+|---|---:|---:|
+| 3 | 50.36 MB | 0.72 s |
+| 9 | 42.95 MB | 2.69 s |
+| 19 | 36.85 MB | 45.06 s |
+
+Level 9 saves about 15% of the output payload for roughly two additional seconds
+of publication work. Level 19 saves about 27% but takes much longer to publish.
+This cost is paid when populating the cache; the byte savings apply to subsequent
+downloads. Cache policy is unchanged automatically. For a new file cache:
+
+```sh
+nix copy --to 'file:///tmp/drvjs-cache?compression=zstd&compression-level=9' ./result
+python3 benchmarks/cache-compression.py ./result --out compression.json
+```
+
+`benchmarks/rebuild.py --case baseline=EXPORT --case direct=EXPORT --case layer=EXPORT`
+compares multiple exports; add `--fresh` to include initial layer preparation with
+tools and downloads already cached, or `--source-edits` to measure ordinary source
+updates in copied exports. `benchmarks/materialize.py --dependency-layer PATH`
+compares direct assembly with attachment outside Nix. The JSON report records
+samples, commands, sizes, and validation scope.
 
 ### Speed and output size
 

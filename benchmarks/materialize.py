@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Compare assembler wall time with already-realized Nix tarballs.
 
-Both executables receive the same inputs. This excludes export,
-Nix evaluation, downloads, NAR hashing/registration and output transfers.
+Both executables receive the same selected project. Direct modes use identical
+archives; --dependency-layer measures attachment with preparation excluded.
+This excludes export, Nix evaluation, downloads, NAR hashing/registration and
+output transfers.
 """
 import argparse
 import json
@@ -21,9 +23,12 @@ parser.add_argument('--out', type=pathlib.Path, required=True)
 parser.add_argument('--runs', type=int, default=3)
 parser.add_argument('--baseline-arg', action='append', default=[], help='Extra assembler argument for an older baseline; repeatable')
 parser.add_argument('--optimized-arg', action='append', default=[], help='Extra assembler argument for the optimized path; repeatable')
+parser.add_argument('--dependency-layer', type=pathlib.Path, help='Use the optimized binary to attach this already-built layer instead of extracting archives')
 args = parser.parse_args()
 if args.runs < 1:
     parser.error('--runs must be positive')
+if args.dependency_layer and args.optimized_arg:
+    parser.error('--dependency-layer cannot be combined with --optimized-arg')
 args.out.mkdir(parents=True, exist_ok=False)
 rows = []
 for trial in range(args.runs):
@@ -35,6 +40,9 @@ for trial in range(args.runs):
                        'assemble', str(args.source.resolve()), str(pathlib.Path(scratch)/'output'),
                        str(args.tarballs.resolve())]
             command += getattr(args, mode + '_arg')
+            if mode == 'optimized' and args.dependency_layer:
+                command = [command[0], 'attach', str(args.source.resolve()),
+                           str(args.dependency_layer.resolve()), str(pathlib.Path(scratch)/'output')]
             with (args.out / f'{mode}-{trial}.log').open('w') as log:
                 started = time.monotonic()
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)

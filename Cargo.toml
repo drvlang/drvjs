@@ -6,6 +6,10 @@ license = "CC0-1.0"
 repository = "https://github.com/ryantm/drvjs"
 description = "Package-granular Nix fetching for pnpm projects"
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
 [dependencies]
 libdeflater = "1"
 zstd = { version = "0.13", default-features = false }

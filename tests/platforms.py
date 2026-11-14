@@ -114,7 +114,10 @@ with tempfile.TemporaryDirectory(prefix='drvjs-platforms-') as scratch:
 
         retained = build('--arg', 'keepVerificationStore', 'true')
         run('drvjs', 'verify', str(retained))
-        for options in [[], ['--arg', 'cachePackages', 'true'], ['--arg', 'zstdArchives', 'true']]:
+        for options in [[], ['--arg', 'cachePackages', 'true'], ['--arg', 'zstdArchives', 'true'],
+                        ['--arg', 'cacheDependencies', 'true'],
+                        ['--arg', 'cacheDependencies', 'true', '--arg', 'zstdArchives', 'true'],
+                        ['--arg', 'cacheDependencies', 'true', '--arg', 'unpackedStore', str(retained / '.pnpm-store')]]:
             output = build(*options)
             check(output)
             run('drvjs', 'verify', str(output), '--store', str(retained / '.pnpm-store'))

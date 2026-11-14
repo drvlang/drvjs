@@ -93,6 +93,14 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
                 alias: {'specifier': spec, 'version': f'link:../{alias}' if spec == 'workspace:*' else spec}
                 for alias, spec in deps.items()
             }}
+        b_manifest = project / 'packages/b/package.json'
+        b_data = json.loads(b_manifest.read_text())
+        b_data['bin'] = {'workspace-tool': './bin/cli.js'}
+        write_json(b_manifest, b_data)
+        workspace_bin = project / 'packages/b/bin/cli.js'
+        workspace_bin.parent.mkdir()
+        workspace_bin.write_text("#!/usr/bin/env node\nconsole.log(require('shared') + require('../value.json'));\n")
+        write_json(project / 'packages/b/value.json', 8)
         # These URLs deliberately do not exist. Neither the incompatible optional
         # package nor its otherwise compatible child may enter the Nix inputs.
         a_manifest = project / 'packages/a/package.json'
@@ -148,6 +156,16 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         original_drv = evaluate(original, 'graph.drvPath')
         first = build(original)
         runtime(first, 1)
+        dependency_drv = evaluate(original, 'graph.dependencies.drvPath')
+        layer = build(original, '-A', 'dependencies')
+        assert not (layer / 'packages/b/value.json').exists()
+        assert not (layer / 'packages/b/index.js').exists()
+        assert (layer / 'packages/b/bin/cli.js').exists()
+        layered = build(original, '--arg', 'cacheDependencies', 'true')
+        runtime(layered, 1)
+        assert run(str(layered / 'packages/a/node_modules/.bin/workspace-tool')) == '50'
+        assert str(layer) not in run('nix-store', '-qR', str(layered)).splitlines()
+        build(original, '--arg', 'cacheDependencies', 'true', '--check')
         assert set(requests) == {'/parent-1.0.0.tgz', '/shared-1.0.0.tgz', '/leaf-1.0.0.tgz'}, requests
         requests.clear()
 
@@ -158,9 +176,15 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
 
         # Included sources invalidate assembly but none of the package work.
         (project / 'packages/b/index.js').write_text('// included edit\n')
+        write_json(project / 'packages/b/new-directory/data.json', {'source': 'new directory'})
+        write_json(project / 'packages/b/value.json', 9)
         source_edit = export('source-edit')
         assert evaluate(source_edit, 'graph.drvPath') != original_drv
         assert contents(source_edit) == original_contents
+        assert evaluate(source_edit, 'graph.dependencies.drvPath') == dependency_drv
+        layered_edit = build(source_edit, '--arg', 'cacheDependencies', 'true')
+        assert run(str(layered_edit / 'packages/a/node_modules/.bin/workspace-tool')) == '51'
+        assert (layered_edit / 'packages/b/new-directory/data.json').is_file()
         assert (build(source_edit) / 'packages/b/index.js').read_text() == '// included edit\n'
         assert not requests
 
@@ -178,6 +202,7 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         lock['snapshots']['parent@1.0.0']['dependencies']['leaf'] = '2.0.0'
         updated = export('dependency-edit')
         updated_contents = contents(updated)
+        assert evaluate(updated, 'graph.dependencies.drvPath') != dependency_drv
         assert updated_contents.keys() == {'parent@1.0.0', 'shared@1.0.0', 'leaf@2.0.0'}
         for name in ['parent@1.0.0', 'shared@1.0.0']:
             assert updated_contents[name] == original_contents[name]
@@ -191,6 +216,22 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         run('drvjs', 'verify', str(second), '--store', str(retained / '.pnpm-store'))
         direct = build(updated, '--arg', 'cachePackages', 'false')
         run('drvjs', 'verify', str(direct), '--store', str(retained / '.pnpm-store'))
+        layered_updated = build(updated, '--arg', 'cacheDependencies', 'true')
+        runtime(layered_updated, 2)
+        run('drvjs', 'verify', str(layered_updated), '--store', str(retained / '.pnpm-store'))
+        layered_retained = build(updated, '--arg', 'cacheDependencies', 'true', '--arg', 'keepVerificationStore', 'true')
+        run('drvjs', 'verify', str(layered_retained))
+        stale = subprocess.run(['drvjs', 'attach', str(updated / 'project'), str(layer), str(root / 'stale-layer')], text=True, capture_output=True)
+        assert stale.returncode and 'dependency layer lockfile differs' in stale.stderr, stale.stderr
+        assert not (root / 'stale-layer').exists()
+
+        # Workspace bin headers are assembly inputs, even when ordinary sources
+        # are excluded. Changing one must invalidate the reusable layer.
+        workspace_bin.write_text(workspace_bin.read_text().replace('env node', 'env -S node --no-warnings'))
+        bin_edit = export('bin-edit')
+        assert evaluate(bin_edit, 'graph.dependencies.drvPath') != evaluate(updated, 'graph.dependencies.drvPath')
+        bin_output = build(bin_edit, '--arg', 'cacheDependencies', 'true')
+        assert run(str(bin_output / 'packages/a/node_modules/.bin/workspace-tool')) == '51'
 
         # Cached metadata cannot silently satisfy a different locked identity.
         manifest = Path(run('nix-build', str(updated), '-A', 'contentsManifest', '--no-out-link'))
@@ -233,6 +274,9 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         build(patched_update, '--check')
         verification = build(patched_update, '--arg', 'keepVerificationStore', 'true')
         run('drvjs', 'verify', str(patched_output), '--store', str(verification / '.pnpm-store'))
+        patched_layered = build(patched_update, '--arg', 'cacheDependencies', 'true')
+        run('drvjs', 'verify', str(patched_layered), '--store', str(verification / '.pnpm-store'))
+        build(patched_update, '--arg', 'cacheDependencies', 'true', '--check')
 
         # A patch edit without a lock update still fails, even with cached contents.
         patch_file.write_text(patch_text + '\n')

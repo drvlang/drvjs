@@ -1,0 +1,2100 @@
+{
+  "date": "2026-11-14",
+  "baseline_commit": "6863c43e7a60f81406fea9924835f51cced56680",
+  "project": {
+    "name": "Vue v3.5.22",
+    "revision": "5a8aa0b2ba575e098cbb63b396e9bcb751eb3a0f"
+  },
+  "environment": {
+    "system": "x86_64-linux",
+    "cpu": "Intel Core i7-1280P",
+    "nix": "nix (Determinate Nix 3.24.1) 2.35.3",
+    "cores": 4,
+    "max_jobs": 4
+  },
+  "methods": {
+    "warm_rebuilds": "Seven alternating/rotating nix-build --check runs per mode and selection. Tools, downloads and layer preparation already realized. Includes evaluation, assembly, NAR checking and daemon overhead. Package-content caching and retained stores disabled. All 63 checks passed.",
+    "ordinary_source_updates": "Seven alternating/rotating ordinary nix-build runs per mode on copied CI exports after changing a source marker. Layers stay cached. The new marker is checked in every result; original exports are unchanged.",
+    "initial_preparation": "Three alternating builds per mode, forcing distinct derivations with an inert nonce. Tools and downloads remain cached, but the installed layer is rebuilt for each layered trial. No network time included.",
+    "assembler_only": "Seven alternating runs on identical selected CI sources. Direct mode reads the same realized archives; attachment reads an already-built layer. Output cleanup and all Nix overhead excluded.",
+    "input_closures": "Realized assembly input outputs plus runtime references, excluding the compiler used to build the helper. Fresh local file binary caches, zstd level 3. Counts all closure bytes, not just the final derivation.",
+    "host_prefetch": "Actual archive file lengths for every locked full-Vue package compared with the exported x86_64-linux target closure. All 741 immutable archives were present and measured. Excludes HTTP overhead; this is a byte count, not network timing.",
+    "compression": "Three alternating publications of the same final CI output and full runtime closure into fresh local file caches at zstd levels 3, 9 and 19. Measures compressed bytes and local wall time, not remote transfer latency.",
+    "parity": "Exact file digests, executable bits, directories and symlink targets for all three selections. Normalize only generated bin/metadata absolute roots. Outputs retain only self references; no package bytes moved into another runtime output."
+  },
+  "cli_binaries": {
+    "baseline": {
+      "sha256": "910dba400f8233c4e631a970bc3a08338787100ce36ea78ff6a23c96aeeb9f5b",
+      "bytes": 6162808
+    },
+    "optimized": {
+      "sha256": "c771b69f21a9940c0ff8353f2caaa8562ece8edf23c8f92b87bff1b69019bd3d",
+      "bytes": 5213104
+    }
+  },
+  "warm_rebuilds": {
+    "subset": {
+      "outputs": {
+        "baseline": "/nix/store/0x59fpj7swgmgaji07dhm99sx0gqi839-drvjs-node-modules",
+        "direct": "/nix/store/ggw5wj49m13m8zz696xpzvqhrm9ryp0h-drvjs-node-modules",
+        "layer": "/nix/store/cdfx97w6k9as9vbscn713d6hps7x5s7w-drvjs-node-modules"
+      },
+      "samples": [
+        {
+          "mode": "baseline",
+          "trial": 0,
+          "seconds": 0.48474668385460973,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 0,
+          "seconds": 0.47955780499614775,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 0,
+          "seconds": 0.43704430712386966,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 1,
+          "seconds": 0.4836706230416894,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 1,
+          "seconds": 0.48234437103383243,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 1,
+          "seconds": 0.4332852140069008,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 2,
+          "seconds": 0.45789129193872213,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 2,
+          "seconds": 0.48206315701827407,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 2,
+          "seconds": 0.4887006350327283,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 3,
+          "seconds": 0.43356848997063935,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 3,
+          "seconds": 0.45732002798467875,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 3,
+          "seconds": 0.46522192587144673,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 4,
+          "seconds": 0.4597664240282029,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 4,
+          "seconds": 0.45163266407325864,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 4,
+          "seconds": 0.4765929200220853,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 5,
+          "seconds": 0.47613152186386287,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 5,
+          "seconds": 0.46665646391920745,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 5,
+          "seconds": 0.4568770141340792,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 6,
+          "seconds": 0.4806152209639549,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 6,
+          "seconds": 0.48542823805473745,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 6,
+          "seconds": 0.453194617992267,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-subset-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        }
+      ],
+      "medians": {
+        "direct": 0.47955780499614775,
+        "layer": 0.45163266407325864,
+        "baseline": 0.4806152209639549
+      }
+    },
+    "ci": {
+      "outputs": {
+        "baseline": "/nix/store/82yjgkmskhwbcggic88ljv9m0nhh7s11-drvjs-node-modules",
+        "direct": "/nix/store/rhxsqzn0gk7v4b6vxxsm194545i5ryva-drvjs-node-modules",
+        "layer": "/nix/store/djzz87ii5k4bc5skmxn5dlcpl0jjf787-drvjs-node-modules"
+      },
+      "samples": [
+        {
+          "mode": "baseline",
+          "trial": 0,
+          "seconds": 1.5128593950066715,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-ci",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 0,
+          "seconds": 1.4346106108278036,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 0,
+          "seconds": 1.2571070489939302,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 1,
+          "seconds": 1.4806167481001467,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 1,
+          "seconds": 1.5552755000535399,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-ci",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 1,
+          "seconds": 1.2247094209305942,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 2,
+          "seconds": 1.2517103999853134,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 2,
+          "seconds": 1.5360159520059824,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-ci",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 2,
+          "seconds": 1.4803995830006897,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 3,
+          "seconds": 1.236332138068974,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 3,
+          "seconds": 1.4099691901355982,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 3,
+          "seconds": 1.4929799700621516,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-ci",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 4,
+          "seconds": 1.4327235370874405,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 4,
+          "seconds": 1.213864984922111,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 4,
+          "seconds": 1.4381359410472214,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-ci",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 5,
+          "seconds": 1.4532797939609736,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-ci",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 5,
+          "seconds": 1.2251615850254893,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 5,
+          "seconds": 1.414211534196511,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 6,
+          "seconds": 1.462956985924393,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-ci",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 6,
+          "seconds": 1.5762245180085301,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 6,
+          "seconds": 1.234308805083856,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-ci-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        }
+      ],
+      "medians": {
+        "layer": 1.234308805083856,
+        "direct": 1.4346106108278036,
+        "baseline": 1.4929799700621516
+      }
+    },
+    "full": {
+      "outputs": {
+        "baseline": "/nix/store/8ripk6i4syfiyrigjnqp8dnsq7makpiw-drvjs-node-modules",
+        "direct": "/nix/store/ywa1mc4jvdhn0n9q7x4va44h7k2rifpk-drvjs-node-modules",
+        "layer": "/nix/store/w330x97ywdqx4md38f233kdhqykz89ca-drvjs-node-modules"
+      },
+      "samples": [
+        {
+          "mode": "baseline",
+          "trial": 0,
+          "seconds": 1.8442368521355093,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 0,
+          "seconds": 1.753513062838465,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 0,
+          "seconds": 1.4735090390313417,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 1,
+          "seconds": 1.7251218769233674,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 1,
+          "seconds": 1.808216986944899,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 1,
+          "seconds": 1.4762484037782997,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 2,
+          "seconds": 1.6507522359024733,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 2,
+          "seconds": 1.8168323491699994,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 2,
+          "seconds": 1.7356886130291969,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 3,
+          "seconds": 1.639053411083296,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 3,
+          "seconds": 1.7126619000919163,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 3,
+          "seconds": 1.810713353101164,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 4,
+          "seconds": 1.763379210839048,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 4,
+          "seconds": 1.4888370700646192,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 4,
+          "seconds": 1.8265831670723855,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 5,
+          "seconds": 1.8177352650091052,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 5,
+          "seconds": 1.5805516492109746,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 5,
+          "seconds": 1.7209990490227938,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 6,
+          "seconds": 1.8140558819286525,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/before-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "direct",
+          "trial": 6,
+          "seconds": 1.7115996228531003,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/after-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        },
+        {
+          "mode": "layer",
+          "trial": 6,
+          "seconds": 1.6041146060451865,
+          "command": [
+            "nix-build",
+            "/tmp/drvjs-transfer/layer-full-final",
+            "--no-out-link",
+            "--max-jobs",
+            "4",
+            "--cores",
+            "4",
+            "--check"
+          ]
+        }
+      ],
+      "medians": {
+        "direct": 1.7251218769233674,
+        "layer": 1.5805516492109746,
+        "baseline": 1.8168323491699994
+      }
+    }
+  },
+  "ordinary_source_updates": {
+    "outputs": {
+      "baseline": "/nix/store/82yjgkmskhwbcggic88ljv9m0nhh7s11-drvjs-node-modules",
+      "direct": "/nix/store/rhxsqzn0gk7v4b6vxxsm194545i5ryva-drvjs-node-modules",
+      "layer": "/nix/store/djzz87ii5k4bc5skmxn5dlcpl0jjf787-drvjs-node-modules"
+    },
+    "samples": [
+      {
+        "mode": "baseline",
+        "trial": 0,
+        "seconds": 2.774955823086202,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/baseline",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/w2cxawn453dsf739k30w3321281zdz3i-drvjs-node-modules"
+      },
+      {
+        "mode": "direct",
+        "trial": 0,
+        "seconds": 2.7348021150100976,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/direct",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/7p86s562rqjvkvi6iqfa73qjxv18q8sd-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 0,
+        "seconds": 2.4174264839384705,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/layer",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/bsjnxy7z8fmz12xd69i1b9ypxxml06hr-drvjs-node-modules"
+      },
+      {
+        "mode": "direct",
+        "trial": 1,
+        "seconds": 2.70506286714226,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/direct",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/ri7vsk59srhnalkryj8yr6dsx03bhwza-drvjs-node-modules"
+      },
+      {
+        "mode": "baseline",
+        "trial": 1,
+        "seconds": 2.734121666988358,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/baseline",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/2fjk3a1ghwyfkkszmz278qr9b9bz6i8s-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 1,
+        "seconds": 2.44939924008213,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/layer",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/8b2avf6ql6a23a6ssrw7cvdy6pf4jg90-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 2,
+        "seconds": 2.7422069220338017,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/layer",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/r450jnvavmsvysp2r72zsjfbrz91cmxd-drvjs-node-modules"
+      },
+      {
+        "mode": "baseline",
+        "trial": 2,
+        "seconds": 2.7060164189897478,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/baseline",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/9g8j8mnn8awa7in44r1iyy17yrksg8fz-drvjs-node-modules"
+      },
+      {
+        "mode": "direct",
+        "trial": 2,
+        "seconds": 2.543552917893976,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/direct",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/sxdyspy8v1hwvjhmp0invv2xdj6m7qzs-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 3,
+        "seconds": 2.6012691389769316,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/layer",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/waqsm7s0glasfk8h1mbhi5046k1a2cjg-drvjs-node-modules"
+      },
+      {
+        "mode": "direct",
+        "trial": 3,
+        "seconds": 2.8396663770545274,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/direct",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/3v9rrfz6m65pqdpqzqs18g2bys7hqhjp-drvjs-node-modules"
+      },
+      {
+        "mode": "baseline",
+        "trial": 3,
+        "seconds": 2.701598925050348,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/baseline",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/p27s108hyfx4wf9a2h41hnzx45wp93qm-drvjs-node-modules"
+      },
+      {
+        "mode": "direct",
+        "trial": 4,
+        "seconds": 2.7444800829980522,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/direct",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/fcg809swcfjim1356sha85xqndpbmydf-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 4,
+        "seconds": 2.4117147820070386,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/layer",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/ss16cm4g7xk3bchbrvhkdyngj052pwdr-drvjs-node-modules"
+      },
+      {
+        "mode": "baseline",
+        "trial": 4,
+        "seconds": 2.6747595658525825,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/baseline",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/wg6zsk34z42yyi5hvvlrflr1hhx43bx2-drvjs-node-modules"
+      },
+      {
+        "mode": "baseline",
+        "trial": 5,
+        "seconds": 2.6365095691289753,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/baseline",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/jpl5nama8xx8yjm97ycxcnghpqzfgfcd-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 5,
+        "seconds": 2.5289950179867446,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/layer",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/hhm2p6vslks7fqlny78wlb6mq3blv3hy-drvjs-node-modules"
+      },
+      {
+        "mode": "direct",
+        "trial": 5,
+        "seconds": 2.6475727329961956,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/direct",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/1jhpjbbldxi1gi0x6p8drx0dmyjjgjcp-drvjs-node-modules"
+      },
+      {
+        "mode": "baseline",
+        "trial": 6,
+        "seconds": 2.705753388814628,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/baseline",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/arx3djkadiz4zybg3wv3km8r0vbqg32n-drvjs-node-modules"
+      },
+      {
+        "mode": "direct",
+        "trial": 6,
+        "seconds": 2.579643048113212,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/direct",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/v00md1aji63lkip8s60dxkcg3crk8kc0-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 6,
+        "seconds": 2.454297395888716,
+        "command": [
+          "nix-build",
+          "/tmp/drvjs-transfer/source-edits-final/exports/layer",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/s9lk2w54x071l7wcrvxa8xxw291zx1ld-drvjs-node-modules"
+      }
+    ],
+    "medians": {
+      "baseline": 2.705753388814628,
+      "layer": 2.454297395888716,
+      "direct": 2.70506286714226
+    }
+  },
+  "initial_preparation": {
+    "outputs": {
+      "direct": "/nix/store/rhxsqzn0gk7v4b6vxxsm194545i5ryva-drvjs-node-modules",
+      "layer": "/nix/store/djzz87ii5k4bc5skmxn5dlcpl0jjf787-drvjs-node-modules"
+    },
+    "samples": [
+      {
+        "mode": "direct",
+        "trial": 0,
+        "seconds": 2.49907560297288,
+        "command": [
+          "nix-build",
+          "--expr",
+          "{ export, nonce }: let\n              graph = import export {};\n              fresh = g: args: builtins.derivation {\n                inherit (g) name system builder;\n                inherit args;\n                PATH = g.PATH or \"\";\n                preferLocalBuild = true;\n                DRVJS_BENCHMARK_NONCE = nonce;\n              };\n              args = if builtins.head graph.args == \"attach\" then\n                builtins.genList (i: if i == 2 then fresh graph.dependencies graph.dependencies.args\n                  else builtins.elemAt graph.args i) (builtins.length graph.args)\n                else graph.args;\n            in fresh graph args",
+          "--argstr",
+          "export",
+          "/tmp/drvjs-transfer/after-ci-final",
+          "--argstr",
+          "nonce",
+          "drvjs-rebuild-2pm1jkbf-0",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/y4335vl9qz1l2j2fqbnri5fala7bx14x-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 0,
+        "seconds": 4.2914337338879704,
+        "command": [
+          "nix-build",
+          "--expr",
+          "{ export, nonce }: let\n              graph = import export {};\n              fresh = g: args: builtins.derivation {\n                inherit (g) name system builder;\n                inherit args;\n                PATH = g.PATH or \"\";\n                preferLocalBuild = true;\n                DRVJS_BENCHMARK_NONCE = nonce;\n              };\n              args = if builtins.head graph.args == \"attach\" then\n                builtins.genList (i: if i == 2 then fresh graph.dependencies graph.dependencies.args\n                  else builtins.elemAt graph.args i) (builtins.length graph.args)\n                else graph.args;\n            in fresh graph args",
+          "--argstr",
+          "export",
+          "/tmp/drvjs-transfer/layer-ci-final",
+          "--argstr",
+          "nonce",
+          "drvjs-rebuild-2pm1jkbf-0",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/k73l0q6khn9iqb1xmqkf2a0lgy1a1kvj-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 1,
+        "seconds": 4.25213847309351,
+        "command": [
+          "nix-build",
+          "--expr",
+          "{ export, nonce }: let\n              graph = import export {};\n              fresh = g: args: builtins.derivation {\n                inherit (g) name system builder;\n                inherit args;\n                PATH = g.PATH or \"\";\n                preferLocalBuild = true;\n                DRVJS_BENCHMARK_NONCE = nonce;\n              };\n              args = if builtins.head graph.args == \"attach\" then\n                builtins.genList (i: if i == 2 then fresh graph.dependencies graph.dependencies.args\n                  else builtins.elemAt graph.args i) (builtins.length graph.args)\n                else graph.args;\n            in fresh graph args",
+          "--argstr",
+          "export",
+          "/tmp/drvjs-transfer/layer-ci-final",
+          "--argstr",
+          "nonce",
+          "drvjs-rebuild-2pm1jkbf-1",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/qrbw60b5dx0phnp5w7ac80dir6llcr4b-drvjs-node-modules"
+      },
+      {
+        "mode": "direct",
+        "trial": 1,
+        "seconds": 2.4951790089253336,
+        "command": [
+          "nix-build",
+          "--expr",
+          "{ export, nonce }: let\n              graph = import export {};\n              fresh = g: args: builtins.derivation {\n                inherit (g) name system builder;\n                inherit args;\n                PATH = g.PATH or \"\";\n                preferLocalBuild = true;\n                DRVJS_BENCHMARK_NONCE = nonce;\n              };\n              args = if builtins.head graph.args == \"attach\" then\n                builtins.genList (i: if i == 2 then fresh graph.dependencies graph.dependencies.args\n                  else builtins.elemAt graph.args i) (builtins.length graph.args)\n                else graph.args;\n            in fresh graph args",
+          "--argstr",
+          "export",
+          "/tmp/drvjs-transfer/after-ci-final",
+          "--argstr",
+          "nonce",
+          "drvjs-rebuild-2pm1jkbf-1",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/q0x428s40gkcb3m5q0r28jszw6wrcc7n-drvjs-node-modules"
+      },
+      {
+        "mode": "direct",
+        "trial": 2,
+        "seconds": 2.659138445975259,
+        "command": [
+          "nix-build",
+          "--expr",
+          "{ export, nonce }: let\n              graph = import export {};\n              fresh = g: args: builtins.derivation {\n                inherit (g) name system builder;\n                inherit args;\n                PATH = g.PATH or \"\";\n                preferLocalBuild = true;\n                DRVJS_BENCHMARK_NONCE = nonce;\n              };\n              args = if builtins.head graph.args == \"attach\" then\n                builtins.genList (i: if i == 2 then fresh graph.dependencies graph.dependencies.args\n                  else builtins.elemAt graph.args i) (builtins.length graph.args)\n                else graph.args;\n            in fresh graph args",
+          "--argstr",
+          "export",
+          "/tmp/drvjs-transfer/after-ci-final",
+          "--argstr",
+          "nonce",
+          "drvjs-rebuild-2pm1jkbf-2",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/7akv7izwj3qb2x6h1g3hrvd678v3974d-drvjs-node-modules"
+      },
+      {
+        "mode": "layer",
+        "trial": 2,
+        "seconds": 4.532963414909318,
+        "command": [
+          "nix-build",
+          "--expr",
+          "{ export, nonce }: let\n              graph = import export {};\n              fresh = g: args: builtins.derivation {\n                inherit (g) name system builder;\n                inherit args;\n                PATH = g.PATH or \"\";\n                preferLocalBuild = true;\n                DRVJS_BENCHMARK_NONCE = nonce;\n              };\n              args = if builtins.head graph.args == \"attach\" then\n                builtins.genList (i: if i == 2 then fresh graph.dependencies graph.dependencies.args\n                  else builtins.elemAt graph.args i) (builtins.length graph.args)\n                else graph.args;\n            in fresh graph args",
+          "--argstr",
+          "export",
+          "/tmp/drvjs-transfer/layer-ci-final",
+          "--argstr",
+          "nonce",
+          "drvjs-rebuild-2pm1jkbf-2",
+          "--no-out-link",
+          "--max-jobs",
+          "4",
+          "--cores",
+          "4"
+        ],
+        "output": "/nix/store/jvkmkiyjspfmyxvy53z16d6s09ggmp3j-drvjs-node-modules"
+      }
+    ],
+    "medians": {
+      "layer": 4.2914337338879704,
+      "direct": 2.49907560297288
+    }
+  },
+  "assembler_only": {
+    "direct": {
+      "samples": [
+        {
+          "mode": "baseline",
+          "trial": 0,
+          "seconds": 0.3256926469039172,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/baseline-z8yfl1nq/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 0,
+          "seconds": 0.2853522407822311,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/optimized-63jm5l6n/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 1,
+          "seconds": 0.2619730569422245,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/optimized-bfsavzhm/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 1,
+          "seconds": 0.29082629596814513,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/baseline-aqp3ragt/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 2,
+          "seconds": 0.3010948309674859,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/baseline-uf5rb5y5/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 2,
+          "seconds": 0.25714383902959526,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/optimized-5ej9x8bx/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 3,
+          "seconds": 0.25951348477974534,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/optimized-gbpgx3y5/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 3,
+          "seconds": 0.2909696321003139,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/baseline-lgpdnt98/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 4,
+          "seconds": 0.295251090079546,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/baseline-yqfj7y6j/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 4,
+          "seconds": 0.30420887214131653,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/optimized-f0cjswar/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 5,
+          "seconds": 0.26279319706372917,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/optimized-djbkalez/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 5,
+          "seconds": 0.29089753003790975,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/baseline-4qgxw_63/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 6,
+          "seconds": 0.29199474095366895,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/baseline-x9036m9d/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 6,
+          "seconds": 0.25992872496135533,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-direct-final/optimized-brrognsi/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        }
+      ],
+      "medians": {
+        "baseline": 0.29199474095366895,
+        "optimized": 0.2619730569422245
+      }
+    },
+    "layer": {
+      "samples": [
+        {
+          "mode": "baseline",
+          "trial": 0,
+          "seconds": 0.2959146788343787,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-layer-final/baseline-x6xf7653/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 0,
+          "seconds": 0.11238157306797802,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "attach",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/nix/store/yv24dmy4mwgbsxgr3sxxygfb42yy4ddf-drvjs-dependencies",
+            "/tmp/drvjs-transfer/materialize-layer-final/optimized-ort18llm/output"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 1,
+          "seconds": 0.1427097050473094,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "attach",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/nix/store/yv24dmy4mwgbsxgr3sxxygfb42yy4ddf-drvjs-dependencies",
+            "/tmp/drvjs-transfer/materialize-layer-final/optimized-5w6hstq3/output"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 1,
+          "seconds": 0.3060161059256643,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-layer-final/baseline-f2hiafz7/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 2,
+          "seconds": 0.30571378604508936,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-layer-final/baseline-giy45heu/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 2,
+          "seconds": 0.11625818395987153,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "attach",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/nix/store/yv24dmy4mwgbsxgr3sxxygfb42yy4ddf-drvjs-dependencies",
+            "/tmp/drvjs-transfer/materialize-layer-final/optimized-hsb6op0x/output"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 3,
+          "seconds": 0.11022558715194464,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "attach",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/nix/store/yv24dmy4mwgbsxgr3sxxygfb42yy4ddf-drvjs-dependencies",
+            "/tmp/drvjs-transfer/materialize-layer-final/optimized-fx84b_81/output"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 3,
+          "seconds": 0.28961419011466205,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-layer-final/baseline-1h0_ot9c/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 4,
+          "seconds": 0.29477220494300127,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-layer-final/baseline-4llxymis/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 4,
+          "seconds": 0.11427624803036451,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "attach",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/nix/store/yv24dmy4mwgbsxgr3sxxygfb42yy4ddf-drvjs-dependencies",
+            "/tmp/drvjs-transfer/materialize-layer-final/optimized-24p_uk49/output"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 5,
+          "seconds": 0.11346751800738275,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "attach",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/nix/store/yv24dmy4mwgbsxgr3sxxygfb42yy4ddf-drvjs-dependencies",
+            "/tmp/drvjs-transfer/materialize-layer-final/optimized-26gtmccr/output"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 5,
+          "seconds": 0.2928394330665469,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-layer-final/baseline-u0mw9m_0/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "trial": 6,
+          "seconds": 0.2962619711179286,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/baseline",
+            "assemble",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/tmp/drvjs-transfer/materialize-layer-final/baseline-w6we7lqt/output",
+            "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json"
+          ]
+        },
+        {
+          "mode": "optimized",
+          "trial": 6,
+          "seconds": 0.13669661385938525,
+          "exit_code": 0,
+          "command": [
+            "/tmp/drvjs-transfer/review-tools/drvjs",
+            "attach",
+            "/tmp/drvjs-transfer/after-ci-final/project",
+            "/nix/store/yv24dmy4mwgbsxgr3sxxygfb42yy4ddf-drvjs-dependencies",
+            "/tmp/drvjs-transfer/materialize-layer-final/optimized-vwsab0xz/output"
+          ]
+        }
+      ],
+      "medians": {
+        "baseline": 0.2959146788343787,
+        "optimized": 0.11427624803036451
+      }
+    }
+  },
+  "input_closures": {
+    "baseline": {
+      "derivation": "/nix/store/jpw510wxvlw96mz2h94px19wfg7my0j8-drvjs-node-modules.drv",
+      "input_roots": [
+        "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json",
+        "/nix/store/prh2yrf4mz6nk0bh07s3mpw8lhd173r1-drvjs-0.1.0-unwrapped",
+        "/nix/store/qqxpljf2s8axp6sql4a68g7f75gdm0c2-project"
+      ],
+      "input_paths": 624,
+      "input_nar_bytes": 136614560,
+      "output": "/nix/store/82yjgkmskhwbcggic88ljv9m0nhh7s11-drvjs-node-modules",
+      "input_zstd_bytes": 96166799,
+      "output_zstd_bytes": 50358154,
+      "output_nar_bytes": 233544192,
+      "output_references": [
+        "/nix/store/82yjgkmskhwbcggic88ljv9m0nhh7s11-drvjs-node-modules"
+      ]
+    },
+    "direct": {
+      "derivation": "/nix/store/00dgg8ljib4xdl8hb9rhnzbsmmj2grbz-drvjs-node-modules.drv",
+      "input_roots": [
+        "/nix/store/00wgz2yii7arvp9ndx0qxr4gipmcijf4-drvjs-0.1.0-unwrapped",
+        "/nix/store/7gpm9n1mj8rggzlvhkjcxiaafaqwgidi-drvjs-tarballs.json",
+        "/nix/store/qqxpljf2s8axp6sql4a68g7f75gdm0c2-project"
+      ],
+      "input_paths": 624,
+      "input_nar_bytes": 135674320,
+      "output": "/nix/store/rhxsqzn0gk7v4b6vxxsm194545i5ryva-drvjs-node-modules",
+      "input_zstd_bytes": 96022673,
+      "output_zstd_bytes": 50358086,
+      "output_nar_bytes": 233544192,
+      "output_references": [
+        "/nix/store/rhxsqzn0gk7v4b6vxxsm194545i5ryva-drvjs-node-modules"
+      ]
+    },
+    "layer": {
+      "derivation": "/nix/store/df2lwlrclf96rm936c3zkhagww3jmwzw-drvjs-node-modules.drv",
+      "input_roots": [
+        "/nix/store/00wgz2yii7arvp9ndx0qxr4gipmcijf4-drvjs-0.1.0-unwrapped",
+        "/nix/store/qqxpljf2s8axp6sql4a68g7f75gdm0c2-project",
+        "/nix/store/yv24dmy4mwgbsxgr3sxxygfb42yy4ddf-drvjs-dependencies"
+      ],
+      "input_paths": 9,
+      "input_nar_bytes": 287154968,
+      "output": "/nix/store/djzz87ii5k4bc5skmxn5dlcpl0jjf787-drvjs-node-modules",
+      "input_zstd_bytes": 66663160,
+      "output_zstd_bytes": 50358223,
+      "output_nar_bytes": 233544192,
+      "output_references": [
+        "/nix/store/djzz87ii5k4bc5skmxn5dlcpl0jjf787-drvjs-node-modules"
+      ]
+    }
+  },
+  "output_parity": {
+    "subset": {
+      "baseline": {
+        "output": "/nix/store/0x59fpj7swgmgaji07dhm99sx0gqi839-drvjs-node-modules",
+        "nar_bytes": 21182376,
+        "references": [
+          "/nix/store/0x59fpj7swgmgaji07dhm99sx0gqi839-drvjs-node-modules"
+        ]
+      },
+      "direct": {
+        "output": "/nix/store/ggw5wj49m13m8zz696xpzvqhrm9ryp0h-drvjs-node-modules",
+        "nar_bytes": 21182376,
+        "references": [
+          "/nix/store/ggw5wj49m13m8zz696xpzvqhrm9ryp0h-drvjs-node-modules"
+        ]
+      },
+      "layer": {
+        "output": "/nix/store/cdfx97w6k9as9vbscn713d6hps7x5s7w-drvjs-node-modules",
+        "nar_bytes": 21182376,
+        "references": [
+          "/nix/store/cdfx97w6k9as9vbscn713d6hps7x5s7w-drvjs-node-modules"
+        ]
+      },
+      "parity_entries": 2523
+    },
+    "ci": {
+      "baseline": {
+        "output": "/nix/store/82yjgkmskhwbcggic88ljv9m0nhh7s11-drvjs-node-modules",
+        "nar_bytes": 233544192,
+        "references": [
+          "/nix/store/82yjgkmskhwbcggic88ljv9m0nhh7s11-drvjs-node-modules"
+        ]
+      },
+      "direct": {
+        "output": "/nix/store/rhxsqzn0gk7v4b6vxxsm194545i5ryva-drvjs-node-modules",
+        "nar_bytes": 233544192,
+        "references": [
+          "/nix/store/rhxsqzn0gk7v4b6vxxsm194545i5ryva-drvjs-node-modules"
+        ]
+      },
+      "layer": {
+        "output": "/nix/store/djzz87ii5k4bc5skmxn5dlcpl0jjf787-drvjs-node-modules",
+        "nar_bytes": 233544192,
+        "references": [
+          "/nix/store/djzz87ii5k4bc5skmxn5dlcpl0jjf787-drvjs-node-modules"
+        ]
+      },
+      "parity_entries": 21935
+    },
+    "full": {
+      "baseline": {
+        "output": "/nix/store/8ripk6i4syfiyrigjnqp8dnsq7makpiw-drvjs-node-modules",
+        "nar_bytes": 360350808,
+        "references": [
+          "/nix/store/8ripk6i4syfiyrigjnqp8dnsq7makpiw-drvjs-node-modules"
+        ]
+      },
+      "direct": {
+        "output": "/nix/store/ywa1mc4jvdhn0n9q7x4va44h7k2rifpk-drvjs-node-modules",
+        "nar_bytes": 360350808,
+        "references": [
+          "/nix/store/ywa1mc4jvdhn0n9q7x4va44h7k2rifpk-drvjs-node-modules"
+        ]
+      },
+      "layer": {
+        "output": "/nix/store/w330x97ywdqx4md38f233kdhqykz89ca-drvjs-node-modules",
+        "nar_bytes": 360350808,
+        "references": [
+          "/nix/store/w330x97ywdqx4md38f233kdhqykz89ca-drvjs-node-modules"
+        ]
+      },
+      "parity_entries": 25880
+    }
+  },
+  "host_prefetch": {
+    "packages": 741,
+    "target_packages": 635,
+    "archive_bytes": {
+      "all": 432091510,
+      "target": 100932392
+    },
+    "missing": []
+  },
+  "compression": {
+    "output": "/nix/store/djzz87ii5k4bc5skmxn5dlcpl0jjf787-drvjs-node-modules",
+    "closure_paths": [
+      "/nix/store/djzz87ii5k4bc5skmxn5dlcpl0jjf787-drvjs-node-modules"
+    ],
+    "samples": [
+      {
+        "trial": 0,
+        "level": 3,
+        "closure_bytes": 50358223,
+        "publish_seconds": 0.6911967759951949
+      },
+      {
+        "trial": 0,
+        "level": 9,
+        "closure_bytes": 42948600,
+        "publish_seconds": 2.66181029798463
+      },
+      {
+        "trial": 0,
+        "level": 19,
+        "closure_bytes": 36852770,
+        "publish_seconds": 45.048298527952284
+      },
+      {
+        "trial": 1,
+        "level": 19,
+        "closure_bytes": 36852770,
+        "publish_seconds": 45.057193057844415
+      },
+      {
+        "trial": 1,
+        "level": 9,
+        "closure_bytes": 42948600,
+        "publish_seconds": 2.6893307860009372
+      },
+      {
+        "trial": 1,
+        "level": 3,
+        "closure_bytes": 50358223,
+        "publish_seconds": 0.7172043810132891
+      },
+      {
+        "trial": 2,
+        "level": 3,
+        "closure_bytes": 50358223,
+        "publish_seconds": 0.7314979620277882
+      },
+      {
+        "trial": 2,
+        "level": 9,
+        "closure_bytes": 42948600,
+        "publish_seconds": 2.7124103158712387
+      },
+      {
+        "trial": 2,
+        "level": 19,
+        "closure_bytes": 36852770,
+        "publish_seconds": 45.35918482602574
+      }
+    ],
+    "medians": {
+      "3": {
+        "bytes": 50358223,
+        "publish_seconds": 0.7172043810132891
+      },
+      "9": {
+        "bytes": 42948600,
+        "publish_seconds": 2.6893307860009372
+      },
+      "19": {
+        "bytes": 36852770,
+        "publish_seconds": 45.057193057844415
+      }
+    }
+  },
+  "validation": {
+    "rust_unit_tests": 42,
+    "clippy": "all targets, warnings denied",
+    "pnpm": "10.34.5",
+    "ci_installed_packages": 611,
+    "full_installed_packages": 631,
+    "arm64_runtime_tested": false,
+    "scope": "Nix package/flake checks; all native integration, fetch, registry, CI, incremental cache, platform and pinned Vue tests. Layer tests cover source and bin changes, new directories, workspace cycles, patches, input mismatch rejection, retained/external stores, zstd, pnpm parity, reproducibility and no hidden layer runtime reference. CI layer and zero-registry reactivity layer independently verified with offline pnpm. Native SWC, Rollup, Parcel watcher and unrs-resolver runtime checks."
+  }
+}

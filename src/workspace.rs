@@ -512,6 +512,10 @@ pub fn copy_support(project: &Path, output: &Path, lock: &str) -> Result<()> {
 
 pub fn importer_paths(project: &Path) -> Result<Vec<PathBuf>> {
     let lock: Value = serde_yaml_ng::from_slice(&fs::read(project.join("pnpm-lock.yaml"))?)?;
+    importer_paths_from_lock(&lock)
+}
+
+pub fn importer_paths_from_lock(lock: &Value) -> Result<Vec<PathBuf>> {
     lock["importers"]
         .as_object()
         .context("missing importers")?

@@ -7,6 +7,7 @@
   }).outPath {},
   unpackedStore ? null,
   cachePackages ? (builtins.fromJSON (builtins.readFile ./options.json)).cachePackages or false,
+  cacheDependencies ? (builtins.fromJSON (builtins.readFile ./options.json)).cacheDependencies or false,
   zstdArchives ? (builtins.fromJSON (builtins.readFile ./options.json)).zstdArchives or false,
   keepVerificationStore ? (builtins.fromJSON (builtins.readFile ./options.json)).keepVerificationStore
 }:
@@ -90,22 +91,43 @@ PY
   contentsManifest = pkgs.writeText "drvjs-package-contents.json"
     (builtins.toJSON (builtins.mapAttrs (_: toString) packageContents));
   nativeBuildInputs = [ drvjs.unwrapped ]
-    ++ pkgs.lib.optional (!useContents && (plan.hasPatches or true)) pkgs.gitMinimal;
+    ++ pkgs.lib.optional (!cacheDependencies && !useContents && (plan.hasPatches or true)) pkgs.gitMinimal;
+  # Keep only assembly inputs and their ancestor directories. Ordinary source
+  # edits (including new directories) leave this store path unchanged.
+  dependencyPaths = pkgs.lib.concatMap (file:
+    let parts = pkgs.lib.splitString "/" file;
+    in builtins.genList (i: pkgs.lib.concatStringsSep "/" (pkgs.lib.take (i + 1) parts)) (builtins.length parts)
+  ) (plan.dependencyFiles or []);
+  dependencyEntries = builtins.listToAttrs (map (name: { inherit name; value = true; }) dependencyPaths);
+  dependencyProject = if dependencyPaths == [] then ./project else builtins.path {
+    path = ./project;
+    name = "project";
+    filter = path: _: path == toString ./project || builtins.hasAttr
+      (pkgs.lib.removePrefix "${toString ./project}/" path) dependencyEntries;
+  };
   # Assembly is self-contained Rust. No shell/stdenv setup or tool closure is
   # needed; only patches require Git. Keep arguments separate from shell syntax.
-  assembly = builtins.derivation {
-    name = "drvjs-node-modules";
+  assemble = project: name: builtins.derivation {
+    inherit name;
     inherit (drvjs.unwrapped) system;
     builder = "${drvjs.unwrapped}/bin/drvjs";
     preferLocalBuild = true;
     PATH = pkgs.lib.makeBinPath (pkgs.lib.optional (!useContents && (plan.hasPatches or true)) pkgs.gitMinimal);
-    args = [ "assemble" ./project (builtins.placeholder "out")
+    args = [ "assemble" project (builtins.placeholder "out")
       (if unpackedStore == null && !useContents then sources else pkgs.writeText "unused-tarballs.json" "[]") ]
       ++ pkgs.lib.optionals (unpackedStore != null) [ "--unpacked-store" unpackedStore ]
       ++ pkgs.lib.optional keepVerificationStore "--keep-verification-store"
       ++ pkgs.lib.optionals useContents [ "--package-contents" contentsManifest ];
   };
-in assembly // {
-  inherit nativeBuildInputs tarballs packageContents contentsManifest;
+  dependencies = assemble dependencyProject "drvjs-dependencies";
+  attached = builtins.derivation {
+    name = "drvjs-node-modules";
+    inherit (drvjs.unwrapped) system;
+    builder = "${drvjs.unwrapped}/bin/drvjs";
+    preferLocalBuild = true;
+    args = [ "attach" ./project dependencies (builtins.placeholder "out") ];
+  };
+in (if cacheDependencies then attached else assemble ./project "drvjs-node-modules") // {
+  inherit nativeBuildInputs tarballs packageContents contentsManifest dependencies dependencyProject;
   archiveSources = sources;
 }

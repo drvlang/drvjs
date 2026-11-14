@@ -1,4 +1,5 @@
 mod config;
+mod dependency_layer;
 mod fetch;
 mod native;
 mod native_store;
@@ -47,6 +48,9 @@ enum Commands {
         /// Cache extracted packages independently for repeated CI builds.
         #[arg(long)]
         cache_packages: bool,
+        /// Cache the installed dependency tree across workspace source edits.
+        #[arg(long)]
+        cache_dependencies: bool,
     },
     /// Import authenticated tarballs into Nix without storing credentials.
     Fetch {
@@ -56,6 +60,12 @@ enum Commands {
         /// Fetch public tarballs too (default: custom/private registries only).
         #[arg(long)]
         all: bool,
+        /// Target Nix system to prefetch (defaults to the current host).
+        #[arg(long, conflicts_with = "all_platforms")]
+        system: Option<String>,
+        /// Prefetch every platform in the exported lockfile.
+        #[arg(long)]
+        all_platforms: bool,
     },
     /// Compare node_modules with pnpm's fresh offline reconstruction.
     Verify {
@@ -93,6 +103,21 @@ enum Commands {
         patch: PathBuf,
         hash: String,
     },
+    #[command(hide = true)]
+    Attach {
+        source: PathBuf,
+        layer: PathBuf,
+        out: PathBuf,
+    },
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildOptions {
+    keep_verification_store: bool,
+    zstd_archives: bool,
+    cache_packages: bool,
+    cache_dependencies: bool,
 }
 
 fn export(
@@ -100,9 +125,7 @@ fn export(
     out: &Path,
     filters: &[String],
     npmrc: Option<&Path>,
-    keep_verification_store: bool,
-    zstd_archives: bool,
-    cache_packages: bool,
+    options: BuildOptions,
 ) -> Result<()> {
     let project = project.canonicalize()?;
     let lock = fs::read_to_string(project.join("pnpm-lock.yaml"))?;
@@ -124,15 +147,14 @@ fn export(
     let stage = tempfile::tempdir_in(parent)?;
     workspace::write_project(&project, &stage.path().join("project"), &selection)?;
     plan.target_packages = native::target_packages(&stage.path().join("project"))?;
+    plan.dependency_files = dependency_layer::files(&stage.path().join("project"))?;
     fs::write(
         stage.path().join("plan.json"),
         serde_json::to_vec_pretty(&plan)?,
     )?;
     fs::write(
         stage.path().join("options.json"),
-        serde_json::to_vec_pretty(
-            &serde_json::json!({"keepVerificationStore": keep_verification_store, "zstdArchives": zstd_archives, "cachePackages": cache_packages}),
-        )?,
+        serde_json::to_vec_pretty(&options)?,
     )?;
     fs::write(
         stage.path().join("default.nix"),
@@ -145,6 +167,10 @@ fn export(
         ("Cargo.lock", include_str!("../Cargo.lock")),
         ("src/main.rs", include_str!("main.rs")),
         ("src/config.rs", include_str!("config.rs")),
+        (
+            "src/dependency_layer.rs",
+            include_str!("dependency_layer.rs"),
+        ),
         ("src/fetch.rs", include_str!("fetch.rs")),
         ("src/plan.rs", include_str!("plan.rs")),
         ("src/pnpm.rs", include_str!("pnpm.rs")),
@@ -179,20 +205,32 @@ fn main() {
             keep_verification_store,
             zstd_archives,
             cache_packages,
+            cache_dependencies,
         } => export(
             &directory,
             &out,
             &filters,
             npmrc.as_deref(),
-            keep_verification_store,
-            zstd_archives,
-            cache_packages,
+            BuildOptions {
+                keep_verification_store,
+                zstd_archives,
+                cache_packages,
+                cache_dependencies,
+            },
         ),
         Commands::Fetch {
             directory,
             npmrc,
             all,
-        } => fetch::fetch(&directory, npmrc.as_deref(), all),
+            system,
+            all_platforms,
+        } => fetch::fetch(
+            &directory,
+            npmrc.as_deref(),
+            all,
+            system.as_deref(),
+            all_platforms,
+        ),
         Commands::Verify { directory, store } => verify::verify(&directory, store.as_deref()),
         Commands::Assemble {
             source,
@@ -221,6 +259,7 @@ fn main() {
             patch,
             hash,
         } => package_cache::patch(&source, &out, &patch, &hash),
+        Commands::Attach { source, layer, out } => dependency_layer::attach(&source, &layer, &out),
     };
     if let Err(error) = result.context("drvjs failed") {
         eprintln!("{error:#}");

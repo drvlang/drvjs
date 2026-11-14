@@ -161,12 +161,28 @@ pub fn complete_integrities(lock: &mut String, npmrc: Option<&Path>) -> Result<(
     Ok(())
 }
 
-pub fn fetch(export: &Path, npmrc: Option<&Path>, all: bool) -> Result<()> {
+pub fn fetch(
+    export: &Path,
+    npmrc: Option<&Path>,
+    all: bool,
+    system: Option<&str>,
+    all_platforms: bool,
+) -> Result<()> {
     let plan: Plan = serde_json::from_slice(&fs::read(export.join("plan.json"))?)?;
+    let current = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+    let system = system.unwrap_or(&current);
+    let active = if all_platforms || plan.target_packages.is_empty() {
+        // Legacy exports have no target graph. Preserve their previous behavior.
+        None
+    } else {
+        Some(plan.target_packages.get(system).with_context(|| {
+            format!("export has no target graph for {system}; use --system with a declared target or --all-platforms")
+        })?)
+    };
     let packages: Vec<_> = plan
         .packages
         .into_iter()
-        .filter(|p| all || p.private)
+        .filter(|p| (all || p.private) && active.is_none_or(|ids| ids.contains(&p.id)))
         .collect();
     if packages.is_empty() {
         println!("Imported 0 verified tarballs into Nix");

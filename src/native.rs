@@ -112,31 +112,51 @@ fn relative(from: &Path, to: &Path) -> PathBuf {
     p
 }
 fn link(target: &Path, path: &Path) -> Result<()> {
-    if fs::symlink_metadata(path).is_ok() {
-        return Ok(());
-    }
-    fs::create_dir_all(path.parent().unwrap())?;
-    symlink(relative(path.parent().unwrap(), target), path)?;
-    Ok(())
-}
-fn matches_patterns(alias: &str, patterns: &[String]) -> bool {
-    let mut matched = false;
-    for p in patterns {
-        let (neg, p) = p
-            .strip_prefix('!')
-            .map_or((false, p.as_str()), |s| (true, s));
-        let re = format!(
-            "^{}$",
-            regex::escape(p).replace("\\*", ".*").replace("\\?", ".")
-        );
-        if regex::Regex::new(&re).unwrap().is_match(alias) {
-            if neg {
-                return false;
-            }
-            matched = true;
+    let target = relative(path.parent().unwrap(), target);
+    // Most parents already exist. Let symlink report collisions/missing parents
+    // instead of issuing a stat and recursive mkdir for every dependency edge.
+    match symlink(&target, path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(path.parent().unwrap())?;
+            symlink(target, path)?;
+            Ok(())
         }
+        Err(error) => Err(error.into()),
     }
-    matched
+}
+struct HoistPatterns(Vec<(bool, regex::Regex)>);
+impl HoistPatterns {
+    fn new(patterns: &[String]) -> Self {
+        Self(
+            patterns
+                .iter()
+                .map(|p| {
+                    let (neg, p) = p
+                        .strip_prefix('!')
+                        .map_or((false, p.as_str()), |s| (true, s));
+                    let re = format!(
+                        "^{}$",
+                        regex::escape(p).replace("\\*", ".*").replace("\\?", ".")
+                    );
+                    (neg, regex::Regex::new(&re).unwrap())
+                })
+                .collect(),
+        )
+    }
+    fn matches(&self, alias: &str) -> bool {
+        let mut matched = false;
+        for (neg, pattern) in &self.0 {
+            if pattern.is_match(alias) {
+                if *neg {
+                    return false;
+                }
+                matched = true;
+            }
+        }
+        matched
+    }
 }
 fn patterns(value: &Value, default: &[&str]) -> Vec<String> {
     value
@@ -518,10 +538,22 @@ pub fn assemble(
         let entry = optional.entry(base_id(id)).or_insert(true);
         *entry &= snap["optional"].as_bool().unwrap_or(false);
     }
-    let inputs: Vec<_> = package_metadata
+    let mut inputs: Vec<_> = package_metadata
         .iter()
         .filter(|(id, _)| active.contains(id.as_str()))
         .collect();
+    // Start larger archives first so a late large package does not leave the
+    // other workers idle. Package identities and output ordering stay unchanged.
+    inputs.sort_by_cached_key(|(id, _)| {
+        std::cmp::Reverse(
+            sources
+                .get(id.as_str())
+                .and_then(|source| source["file"].as_str())
+                .and_then(|path| fs::metadata(path).ok())
+                .map(|metadata| metadata.len())
+                .unwrap_or(0),
+        )
+    });
     let modules = out.join("node_modules");
     let virtual_store = modules.join(".pnpm");
     fs::create_dir_all(&virtual_store)?;
@@ -770,6 +802,8 @@ pub fn assemble(
     }
     let private = patterns(&settings["hoistPattern"], &["*"]);
     let public = patterns(&settings["publicHoistPattern"], &[]);
+    let private_patterns = HoistPatterns::new(&private);
+    let public_patterns = HoistPatterns::new(&public);
     let mut claimed: BTreeSet<_> = importers
         .get(".")
         .unwrap()
@@ -827,7 +861,7 @@ pub fn assemble(
             }
             if let Some(alias) = manifest["name"].as_str()
                 && !claimed.contains(alias)
-                && matches_patterns(alias, &private)
+                && private_patterns.matches(alias)
             {
                 link(
                     &out.join(id),
@@ -842,9 +876,9 @@ pub fn assemble(
             if claimed.contains(&alias.to_lowercase()) {
                 continue;
             }
-            let kind = if matches_patterns(&alias, &public) {
+            let kind = if public_patterns.matches(&alias) {
                 "public"
-            } else if matches_patterns(&alias, &private) {
+            } else if private_patterns.matches(&alias) {
                 "private"
             } else {
                 continue;
@@ -1198,6 +1232,35 @@ fn link_bins(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hoist_patterns_keep_exclusion_precedence_and_literal_characters() {
+        let patterns = HoistPatterns::new(&[
+            "@scope/*".into(),
+            "!@scope/private?".into(),
+            "literal.+".into(),
+        ]);
+        assert!(patterns.matches("@scope/public"));
+        assert!(!patterns.matches("@scope/private1"));
+        assert!(patterns.matches("literal.+"));
+        assert!(!patterns.matches("literalxx"));
+        assert!(!HoistPatterns::new(&[]).matches("anything"));
+        assert!(!HoistPatterns::new(&["!private".into(), "*".into()]).matches("private"));
+    }
+
+    #[test]
+    fn dependency_links_preserve_existing_files_and_dangling_links() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("nested/dependency");
+        link(&root.path().join("missing"), &path).unwrap();
+        assert_eq!(fs::read_link(&path).unwrap(), Path::new("../missing"));
+        link(&root.path().join("different"), &path).unwrap();
+        assert_eq!(fs::read_link(&path).unwrap(), Path::new("../missing"));
+        let file = root.path().join("existing");
+        fs::write(&file, "keep").unwrap();
+        link(&root.path().join("different"), &file).unwrap();
+        assert_eq!(fs::read_to_string(file).unwrap(), "keep");
+    }
 
     #[test]
     fn target_closure_respects_architectures_and_skipped_transitive_dependencies() {

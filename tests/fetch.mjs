@@ -86,6 +86,36 @@ try {
   assert.match((await fetch('--all')).stdout, /Imported 0 verified tarballs/);
   assert.equal(requests.length, 0, 'cached packages must not be downloaded');
 
+  // New exports select the same target closure as the Nix assembly graph.
+  // Public/private selection is independent of platform selection.
+  const current = `${{ x64: 'x86_64', arm64: 'aarch64' }[process.arch] || process.arch}-${process.platform}`;
+  const other = current === 'aarch64-linux' ? 'x86_64-linux' : 'aarch64-linux';
+  const targeted = { ...plan, targetPackages: {
+    [current]: packages.slice(0, 2).map(p => p.id),
+    [other]: packages.slice(2).map(p => p.id),
+  } };
+  await writeFile(join(root, 'plan.json'), JSON.stringify(targeted));
+  env.NIX_REMOTE = `local?root=${root}/target-store`;
+  requests.length = 0;
+  assert.match((await fetch()).stdout, /Imported 2 verified tarballs/);
+  assert.deepEqual(requests.filter(r => r.path.startsWith('/public/')).map(r => r.path).sort(), ['/public/0', '/public/1']);
+  requests.length = 0;
+  assert.match((await fetch('--all')).stdout, /Imported 0 verified tarballs/);
+  assert.equal(requests.length, 0);
+  assert.match((await fetch('--system', other)).stdout, /Imported 1 verified tarballs/);
+  assert.match((await fetch('--all', '--system', other)).stdout, /Imported 1 verified tarballs/);
+  await run('nix-store', ['--check-validity', ...expected]);
+  requests.length = 0;
+  await assert.rejects(fetch('--system', 'unknown-system'), error => {
+    assert.match(error.stderr, /no target graph/);
+    return true;
+  });
+  assert.equal(requests.length, 0, 'unsupported targets must fail before fetching');
+  env.NIX_REMOTE = `local?root=${root}/all-platforms-store`;
+  assert.match((await fetch('--all-platforms')).stdout, /Imported 3 verified tarballs/);
+  assert.match((await fetch('--all', '--all-platforms')).stdout, /Imported 1 verified tarballs/);
+  await run('nix-store', ['--check-validity', ...expected]);
+
   packages[0].hash = `sha256-${Buffer.alloc(32).toString('base64')}`;
   await writeFile(join(root, 'plan.json'), JSON.stringify({ ...plan, packages: [packages[0]] }));
   await assert.rejects(fetch(), error => {
@@ -96,7 +126,7 @@ try {
   const invalid = (await run('nix-store', ['--print-fixed-path', 'sha256', '0'.repeat(64), packages[0].name])).stdout.trim();
   assert.equal((await run('nix-store', ['--check-validity', '--print-invalid', invalid])).stdout.trim(), invalid);
   assert(!(await readFile(join(root, 'plan.json'), 'utf8')).includes(token));
-  console.log('PASS: bounded parallel fetch, duplicate suppression, private/public selection, scoped redirects, cache reuse, SHA-256/SHA-512, and corrupt-download rejection');
+  console.log('PASS: bounded parallel fetch, target/legacy/all-platform selection, duplicate suppression, private/public selection, scoped redirects, cache reuse, SHA-256/SHA-512, and corrupt-download rejection');
 } finally {
   await new Promise(resolve => server.close(resolve));
   await rm(root, { recursive: true, force: true });

@@ -37,6 +37,8 @@ pub struct Plan {
     pub patches: BTreeMap<String, Value>,
     #[serde(rename = "targetPackages", default)]
     pub target_packages: BTreeMap<String, BTreeSet<String>>,
+    #[serde(rename = "dependencyFiles", default)]
+    pub dependency_files: BTreeSet<String>,
 }
 
 #[cfg(test)]
@@ -158,6 +160,7 @@ pub fn parse_with_registry(input: &str, npmrc: &BTreeMap<String, String>) -> Res
         has_patches: !lock.patched_dependencies.is_empty(),
         patches,
         target_packages: BTreeMap::new(),
+        dependency_files: BTreeSet::new(),
     })
 }
 
