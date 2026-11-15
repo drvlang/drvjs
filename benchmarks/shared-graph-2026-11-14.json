@@ -1,6 +1,7 @@
 {
   "date": "2026-11-14",
   "baseline_commit": "f38d92cd59757ff1b7ea7d3d539b0a82f969590c",
+  "optimized_commit": "b40474ba5d9072bf4cbafbd2a046ee6b92b9c161",
   "project": {
     "name": "Vue v3.5.22",
     "revision": "5a8aa0b2ba575e098cbb63b396e9bcb751eb3a0f",

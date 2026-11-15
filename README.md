@@ -581,8 +581,8 @@ older native assembler, pass `--baseline-arg=--native`.
 ### Shared graph measurements
 
 The [shared-graph measurements](benchmarks/shared-graph-2026-11-14.json) compare
-`f38d92c` with the shared layout on Vue v3.5.22, using the same compiler-sfc plus
-root-tools selection (611 registry instances, six importers). On x86_64-linux
+`f38d92c` with the shared layout at `b40474b` on Vue v3.5.22. Both use the
+compiler-sfc plus root-tools selection (611 registry instances, six importers). On x86_64-linux
 with an i7-1280P and four build cores, seven alternating source updates gave:
 
 | Metric | Direct | Copied dependency cache | Shared graph |

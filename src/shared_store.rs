@@ -151,6 +151,7 @@ pub fn split(layer: &Path, packages: &Path) -> Result<()> {
                 .parent()
                 .is_some_and(|p| p.file_name().is_some_and(|n| n == ".bin"))
             && let Ok(content) = fs::read_to_string(entry.path())
+            && content.contains(layer.to_str().context("non-UTF8 layer")?)
         {
             fs::write(
                 entry.path(),
@@ -202,9 +203,15 @@ mod tests {
         )
         .unwrap();
         fs::write(hoists.join(".bin/native"), [0xff, 0x00, 0x01]).unwrap();
+        let bundled = package.join("node_modules/.bin/bundled");
+        fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        fs::write(&bundled, "#!/bin/sh\nexit 0\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&bundled, fs::Permissions::from_mode(0o555)).unwrap();
         split(&layer, &graph).unwrap();
         assert_eq!(root(&layer).unwrap(), Some(graph.clone()));
         assert!(package.join("index.js").is_file());
+        assert_eq!(fs::read_to_string(&bundled).unwrap(), "#!/bin/sh\nexit 0\n");
         assert!(layer.join(VIRTUAL).join("example@1").is_symlink());
         assert!(graph.join("node_modules/alias/index.js").is_file());
         assert!(!graph.join("node_modules/workspace").is_symlink());
