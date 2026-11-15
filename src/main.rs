@@ -200,6 +200,26 @@ fn export(
     ] {
         fs::write(stage.path().join("drvjs-src").join(name), content)?;
     }
+    if let Some(mut hint) = std::env::var("DRVJS_NIX_HELPER")
+        .ok()
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+        && let Some(path) = hint["path"].as_str()
+        && Path::new(path).parent() == Some(Path::new("/nix/store"))
+        && std::env::current_exe()? == Path::new(path).join("bin/drvjs")
+        && let Ok(output) = std::process::Command::new("nix-store")
+            .args(["--query", "--deriver", path])
+            .output()
+        && output.status.success()
+    {
+        let deriver = String::from_utf8(output.stdout)?;
+        let deriver = deriver.trim();
+        if deriver.ends_with(".drv")
+            && Path::new(deriver).parent() == Some(Path::new("/nix/store"))
+        {
+            hint["deriver"] = deriver.into();
+            fs::write(stage.path().join("helper.json"), serde_json::to_vec(&hint)?)?;
+        }
+    }
     fs::rename(stage.path(), out)?;
     println!(
         "Exported {} workspace importers and {} locked packages to {}",

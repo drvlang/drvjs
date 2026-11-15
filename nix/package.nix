@@ -20,11 +20,25 @@ let
       mainProgram = "drvjs";
     };
   };
+  # Check compilation identity when prewarming the wrapper, not on each export.
+  canonical = import ./package.nix {
+    pkgs = import pkgs.path {
+      system = pkgs.stdenv.hostPlatform.system;
+      config = {};
+      overlays = [];
+    };
+  };
+  helperHint = if unwrapped.drvPath == canonical.unwrapped.drvPath then builtins.toJSON {
+    path = toString unwrapped;
+    source = builtins.hashString "sha256" (toString unwrapped.src);
+    nixpkgs = builtins.hashString "sha256" (toString pkgs.path);
+    inherit (unwrapped) system;
+  } else "";
 in pkgs.runCommand "drvjs-${version}" {
   nativeBuildInputs = [ pkgs.makeWrapper ];
   passthru = { inherit unwrapped; };
   inherit (unwrapped) meta;
 } ''
   mkdir -p "$out/bin"
-  makeWrapper ${unwrapped}/bin/drvjs "$out/bin/drvjs" --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.pnpm_10 pkgs.nodejs pkgs.curl pkgs.nix pkgs.gitMinimal ]}
+  makeWrapper ${unwrapped}/bin/drvjs "$out/bin/drvjs" --set DRVJS_NIX_HELPER ${pkgs.lib.escapeShellArg helperHint} --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.pnpm_10 pkgs.nodejs pkgs.curl pkgs.nix pkgs.gitMinimal ]}
 ''

@@ -11,7 +11,7 @@
   sharedDependencies ? (builtins.fromJSON (builtins.readFile ./options.json)).sharedDependencies or false,
   zstdArchives ? (builtins.fromJSON (builtins.readFile ./options.json)).zstdArchives or false,
   keepVerificationStore ? (builtins.fromJSON (builtins.readFile ./options.json)).keepVerificationStore
-}:
+}@arguments:
 let
   plan = builtins.fromJSON (builtins.readFile ./plan.json);
   active = builtins.listToAttrs (map (id: { name = id; value = true; })
@@ -63,7 +63,29 @@ for source in sources:
 pathlib.Path(sys.argv[2]).write_text(json.dumps(sources))
 PY
   '';
-  drvjs = import ./drvjs-src/nix/package.nix { inherit pkgs; };
+  helperHint = if builtins.pathExists ./helper.json
+    then builtins.fromJSON (builtins.readFile ./helper.json) else null;
+  home = builtins.getEnv "HOME";
+  useHelperHint = !(arguments ? pkgs) && helperHint != null
+    && builtins.getEnv "NIXPKGS_CONFIG" == ""
+    && !(builtins.pathExists "${home}/.config/nixpkgs/config.nix")
+    && !(builtins.pathExists "${home}/.nixpkgs/config.nix")
+    && pkgs.overlays == []
+    && helperHint.system == pkgs.stdenv.hostPlatform.system
+    && helperHint.nixpkgs == builtins.hashString "sha256" (toString pkgs.path)
+    && builtins.pathExists "${helperHint.path}/bin/drvjs"
+    && builtins.pathExists helperHint.deriver
+    && helperHint.source == builtins.hashString "sha256" (toString (builtins.path {
+      path = ./drvjs-src;
+      name = "source";
+    }));
+  drvjs = if useHelperHint then {
+    unwrapped = (import ./drvjs-src/nix/package.nix { inherit pkgs; }).unwrapped // {
+      outPath = builtins.appendContext helperHint.path {
+        ${helperHint.deriver} = { outputs = [ "out" ]; };
+      };
+    };
+  } else import ./drvjs-src/nix/package.nix { inherit pkgs; };
   # No project, lockfile, graph edges or peer suffixes enter these derivations.
   # A dependency update reuses the extraction of every unchanged package.
   contents = builtins.listToAttrs (map (package: {
