@@ -85,7 +85,7 @@ fn dependencies(value: &Value, importer: bool) -> Edges {
     }
     result
 }
-fn normalized(path: &Path) -> PathBuf {
+pub(crate) fn normalized(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
     for c in path.components() {
         match c {

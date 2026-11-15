@@ -118,7 +118,13 @@ fn validate(source: &Path, layer: &Path) -> Result<Vec<PathBuf>> {
     workspace::importer_paths_from_lock(&actual)
 }
 
-fn copy_installation(source: &Path, target: &Path, old_root: &Path, new_root: &Path) -> Result<()> {
+pub(crate) fn copy_installation(
+    source: &Path,
+    target: &Path,
+    old_root: &Path,
+    new_root: &Path,
+    shared: Option<&Path>,
+) -> Result<()> {
     for entry in WalkDir::new(source).follow_root_links(false) {
         let entry = entry?;
         let relative = entry.path().strip_prefix(source)?;
@@ -133,7 +139,10 @@ fn copy_installation(source: &Path, target: &Path, old_root: &Path, new_root: &P
             // Native assembly uses relative links, preserving workspace and peer
             // resolution when the entire installation is moved to another root.
             let link = fs::read_link(entry.path())?;
-            ensure!(!link.is_absolute(), "absolute link in dependency layer");
+            ensure!(
+                !link.is_absolute() || shared.is_some_and(|root| link.starts_with(root)),
+                "unexpected absolute link in dependency layer"
+            );
             symlink(link, destination)?;
         } else {
             ensure!(
@@ -165,18 +174,68 @@ fn copy_installation(source: &Path, target: &Path, old_root: &Path, new_root: &P
 }
 
 pub fn attach(source: &Path, layer: &Path, out: &Path) -> Result<()> {
+    restore(source, layer, out, true)
+}
+
+pub fn materialize(source: &Path, out: &Path) -> Result<()> {
+    restore(source, source, out, false)?;
+    use std::os::unix::fs::PermissionsExt;
+    for entry in WalkDir::new(out) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            fs::set_permissions(
+                entry.path(),
+                fs::Permissions::from_mode(entry.metadata()?.permissions().mode() | 0o200),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn restore(source: &Path, layer: &Path, out: &Path, share: bool) -> Result<()> {
     let started = std::time::Instant::now();
+    let source = source.canonicalize()?;
     let layer = layer.canonicalize()?;
-    let importers = validate(source, &layer)?;
+    let importers = validate(&source, &layer)?;
+    let shared = crate::shared_store::root(&layer)?;
     ensure!(!out.exists(), "output already exists");
+    let parent = out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let destination = parent
+        .canonicalize()?
+        .join(out.file_name().context("output has no filename")?);
+    // Generated pnpm shims embed NODE_PATH in double quotes, and metadata
+    // embeds the root in JSON strings. Nix store paths already obey this;
+    // reject unrepresentable public materialize destinations before copying.
+    ensure!(
+        !destination
+            .to_str()
+            .context("non-UTF8 output path")?
+            .contains(['"', '\\', '$', '`', '\n', '\r', ':']),
+        "output path contains characters unsupported by bin shims: quotes, backslashes, dollar signs, backticks, newlines or colons"
+    );
+    ensure!(
+        !destination.starts_with(&source)
+            && !destination.starts_with(&layer)
+            && shared
+                .as_ref()
+                .is_none_or(|root| !destination.starts_with(root)),
+        "output must be outside the source and dependency inputs"
+    );
     fs::create_dir(out)?;
     let out = out.canonicalize()?;
-    workspace::copy_tree(source, &out)?;
+    workspace::copy_tree(&source, &out)?;
     // Preserve the completed lockfile and executable modes of workspace bins.
     workspace::copy_tree(&layer, &out)?;
     let mut tasks = Vec::new();
     for importer in importers {
-        let modules = importer.join("node_modules");
+        let modules = if importer == Path::new(".") {
+            PathBuf::from("node_modules")
+        } else {
+            importer.join("node_modules")
+        };
         if !layer.join(&modules).exists() {
             continue;
         }
@@ -195,8 +254,25 @@ pub fn attach(source: &Path, layer: &Path, out: &Path) -> Result<()> {
         }
     }
     store::parallel_each(&tasks, |path| {
-        copy_installation(&layer.join(path), &out.join(path), &layer, &out)
-            .with_context(|| format!("copying dependency layer entry {}", path.display()))
+        if !share && path == Path::new(crate::shared_store::MARKER) {
+            return Ok(());
+        }
+        if !share
+            && let Some(shared) = &shared
+            && let Some(relative) = path.strip_prefix("node_modules").ok()
+            && let Some(target) =
+                crate::shared_store::instance(&layer.join(path), relative, shared)?
+        {
+            return copy_installation(&target, &out.join(path), shared, &out, None);
+        }
+        copy_installation(
+            &layer.join(path),
+            &out.join(path),
+            &layer,
+            &out,
+            shared.as_deref(),
+        )
+        .with_context(|| format!("copying dependency layer entry {}", path.display()))
     })?;
     if layer.join(".pnpm-store").exists() {
         copy_installation(
@@ -204,6 +280,7 @@ pub fn attach(source: &Path, layer: &Path, out: &Path) -> Result<()> {
             &out.join(".pnpm-store"),
             &layer,
             &out,
+            None,
         )?;
     }
     eprintln!(
@@ -228,7 +305,14 @@ mod tests {
         fs::write(source.join("file"), "contents").unwrap();
         symlink("file", source.join("link")).unwrap();
         for name in ["file", "link"] {
-            copy_installation(&source.join(name), &target.join(name), &source, &target).unwrap();
+            copy_installation(
+                &source.join(name),
+                &target.join(name),
+                &source,
+                &target,
+                None,
+            )
+            .unwrap();
         }
         assert_eq!(fs::read_to_string(target.join("file")).unwrap(), "contents");
         assert_eq!(
@@ -254,6 +338,21 @@ mod tests {
             fs::read(source.join("pnpm-lock.yaml")).unwrap(),
             fs::read(out.join("pnpm-lock.yaml")).unwrap()
         );
+        let nested = source.join("nested");
+        assert!(
+            materialize(&source, &nested)
+                .unwrap_err()
+                .to_string()
+                .contains("outside")
+        );
+        assert!(!nested.exists());
+        let alias = root.path().join("alias");
+        symlink(&source, &alias).unwrap();
+        assert!(materialize(&source, &alias.join("nested")).is_err());
+        assert!(!nested.exists());
+        let unsafe_path = root.path().join("$expansion");
+        assert!(materialize(&source, &unsafe_path).is_err());
+        assert!(!unsafe_path.exists());
     }
 
     #[test]

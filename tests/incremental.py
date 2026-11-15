@@ -58,12 +58,22 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
             ('shared', '1.0.0', 'module.exports = 42'),
         ]:
             payload = io.BytesIO()
+            package = {'name': name, 'version': version, 'main': 'index.js'}
+            if name == 'parent':
+                package['bin'] = {'parent-tool': 'cli.js'}
+            files = {
+                'package.json': json.dumps(package),
+                'index.js': code,
+                'nonce': root.name,
+            }
+            if name == 'parent':
+                files.update({
+                    'cli.js': "#!/usr/bin/env node\nconsole.log(require('leaf'));\n",
+                    'module.mjs': "import leaf from 'leaf'; export default leaf;\n",
+                    'workspace.cjs': "module.exports = require('b/value.json');\n",
+                })
             with tarfile.open(fileobj=payload, mode='w:gz') as archive:
-                for filename, text in {
-                    'package.json': json.dumps({'name': name, 'version': version, 'main': 'index.js'}),
-                    'index.js': code,
-                    'nonce': root.name,  # prove actual work even on repeated runs
-                }.items():
+                for filename, text in files.items():
                     data = text.encode()
                     info = tarfile.TarInfo('package/' + filename)
                     info.size, info.mode = len(data), 0o644
@@ -75,6 +85,8 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
                 'tarball': f'http://127.0.0.1:{server.server_port}{path}',
                 'integrity': 'sha512-' + base64.b64encode(hashlib.sha512(body).digest()).decode(),
             }}
+            if name == 'parent':
+                metadata[f'{name}@{version}']['hasBin'] = True
         write_json(project / 'package.json', {'name': 'root', 'private': True})
         write_json(project / 'pnpm-workspace.yaml', {'packages': ['packages/*']})
         manifests = {
@@ -149,7 +161,9 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
                 assert.equal(fs.realpathSync('{output}/packages/a/node_modules/b'), '{output}/packages/b');
                 assert.equal(fs.realpathSync('{output}/packages/b/node_modules/a'), '{output}/packages/a');
                 assert(!fs.existsSync('{output}/packages/other'));
+                import(a.resolve('parent/module.mjs')).then(m => assert.equal(m.default, {version}));
             """)
+            assert run(str(output / 'packages/a/node_modules/.bin/parent-tool')) == str(version)
 
         original = export('original')
         original_contents = contents(original)
@@ -163,6 +177,35 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         assert (layer / 'packages/b/bin/cli.js').exists()
         layered = build(original, '--arg', 'cacheDependencies', 'true')
         runtime(layered, 1)
+        shared = build(original, '--arg', 'sharedDependencies', 'true')
+        runtime(shared, 1)
+        shared_packages = Path(json.loads((shared / 'node_modules/.drvjs-shared.json').read_text())['packages'])
+        shared_drv = evaluate(original, '(import ' + str(original) + ' { sharedDependencies = true; }).dependencies.packages.drvPath')
+        assert shared_packages in map(Path, run('nix-store', '-qR', str(shared)).splitlines())
+        assert run(str(shared / 'packages/a/node_modules/.bin/workspace-tool')) == '50'
+        assert (shared / 'node_modules/.pnpm/parent@1.0.0').is_symlink()
+        # The graph must not retain the assembly metadata output or any partial
+        # workspace. Root package paths are shared, workspace sources are local.
+        assert not (shared_packages / 'packages/b/package.json').exists()
+        assert not (shared_packages / 'node_modules/.pnpm/node_modules/b').exists()
+        expanded = root / 'expanded'
+        run('drvjs', 'materialize', str(shared), '-o', str(expanded))
+        runtime(expanded, 1)
+        assert not (expanded / 'node_modules/.pnpm/parent@1.0.0').is_symlink()
+        assert not (expanded / 'node_modules/.drvjs-shared.json').exists()
+        # The shared layout has an explicit runtime boundary: registry packages
+        # cannot use undeclared workspace sources via an ancestor's hoists.
+        run('node', '-e', f"""
+            const a = require('node:assert/strict');
+            const {{createRequire}} = require('node:module');
+            const shared = createRequire('{shared}/packages/a/package.json');
+            const expanded = createRequire('{expanded}/packages/a/package.json');
+            a.throws(() => shared('parent/workspace.cjs'), {{code:'MODULE_NOT_FOUND'}});
+            a.equal(expanded('parent/workspace.cjs'), 8);
+        """)
+        (expanded / 'node_modules/.pnpm/leaf@1.0.0/node_modules/leaf/index.js').write_text('module.exports=99')
+        runtime(shared, 1)
+        build(original, '--arg', 'sharedDependencies', 'true', '--check')
         assert run(str(layered / 'packages/a/node_modules/.bin/workspace-tool')) == '50'
         assert str(layer) not in run('nix-store', '-qR', str(layered)).splitlines()
         build(original, '--arg', 'cacheDependencies', 'true', '--check')
@@ -185,6 +228,11 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         layered_edit = build(source_edit, '--arg', 'cacheDependencies', 'true')
         assert run(str(layered_edit / 'packages/a/node_modules/.bin/workspace-tool')) == '51'
         assert (layered_edit / 'packages/b/new-directory/data.json').is_file()
+        shared_edit = build(source_edit, '--arg', 'sharedDependencies', 'true')
+        assert evaluate(source_edit, '(import ' + str(source_edit) + ' { sharedDependencies = true; }).dependencies.packages.drvPath') == shared_drv
+        assert json.loads((shared_edit / 'node_modules/.drvjs-shared.json').read_text())['packages'] == str(shared_packages)
+        assert run(str(shared_edit / 'packages/a/node_modules/.bin/workspace-tool')) == '51'
+        assert (shared_edit / 'packages/b/new-directory/data.json').is_file()
         assert (build(source_edit) / 'packages/b/index.js').read_text() == '// included edit\n'
         assert not requests
 
@@ -216,6 +264,22 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         run('drvjs', 'verify', str(second), '--store', str(retained / '.pnpm-store'))
         direct = build(updated, '--arg', 'cachePackages', 'false')
         run('drvjs', 'verify', str(direct), '--store', str(retained / '.pnpm-store'))
+        shared_updated = build(updated, '--arg', 'sharedDependencies', 'true')
+        runtime(shared_updated, 2)
+        run('drvjs', 'verify', str(shared_updated), '--store', str(retained / '.pnpm-store'))
+        shared_retained = build(updated, '--arg', 'sharedDependencies', 'true', '--arg', 'keepVerificationStore', 'true')
+        run('drvjs', 'verify', str(shared_retained))
+        # Verification must inspect the external payload, not just the small
+        # project link tree. Construct a writable graph and corrupt one file.
+        writable_layer, writable_graph = root / 'writable-layer', root / 'writable-graph'
+        run('drvjs', 'assemble', str(updated / 'project'), str(writable_layer), '/dev/null',
+            '--unpacked-store', str(retained / '.pnpm-store'), '--shared-packages', str(writable_graph))
+        writable_output = root / 'writable-output'
+        run('drvjs', 'attach', str(updated / 'project'), str(writable_layer), str(writable_output))
+        run('drvjs', 'verify', str(writable_output), '--store', str(retained / '.pnpm-store'))
+        (writable_graph / 'node_modules/.pnpm/leaf@2.0.0/node_modules/leaf/index.js').write_text('module.exports=999')
+        rejected = subprocess.run(['drvjs', 'verify', str(writable_output), '--store', str(retained / '.pnpm-store')], text=True, capture_output=True)
+        assert rejected.returncode and 'node_modules differs' in rejected.stderr, rejected.stderr
         layered_updated = build(updated, '--arg', 'cacheDependencies', 'true')
         runtime(layered_updated, 2)
         run('drvjs', 'verify', str(layered_updated), '--store', str(retained / '.pnpm-store'))
@@ -277,6 +341,8 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         patched_layered = build(patched_update, '--arg', 'cacheDependencies', 'true')
         run('drvjs', 'verify', str(patched_layered), '--store', str(verification / '.pnpm-store'))
         build(patched_update, '--arg', 'cacheDependencies', 'true', '--check')
+        patched_shared = build(patched_update, '--arg', 'sharedDependencies', 'true')
+        run('drvjs', 'verify', str(patched_shared), '--store', str(verification / '.pnpm-store'))
 
         # A patch edit without a lock update still fails, even with cached contents.
         patch_file.write_text(patch_text + '\n')

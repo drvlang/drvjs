@@ -8,6 +8,7 @@
   unpackedStore ? null,
   cachePackages ? (builtins.fromJSON (builtins.readFile ./options.json)).cachePackages or false,
   cacheDependencies ? (builtins.fromJSON (builtins.readFile ./options.json)).cacheDependencies or false,
+  sharedDependencies ? (builtins.fromJSON (builtins.readFile ./options.json)).sharedDependencies or false,
   zstdArchives ? (builtins.fromJSON (builtins.readFile ./options.json)).zstdArchives or false,
   keepVerificationStore ? (builtins.fromJSON (builtins.readFile ./options.json)).keepVerificationStore
 }:
@@ -91,7 +92,7 @@ PY
   contentsManifest = pkgs.writeText "drvjs-package-contents.json"
     (builtins.toJSON (builtins.mapAttrs (_: toString) packageContents));
   nativeBuildInputs = [ drvjs.unwrapped ]
-    ++ pkgs.lib.optional (!cacheDependencies && !useContents && (plan.hasPatches or true)) pkgs.gitMinimal;
+    ++ pkgs.lib.optional (!(cacheDependencies || sharedDependencies) && !useContents && (plan.hasPatches or true)) pkgs.gitMinimal;
   # Keep only assembly inputs and their ancestor directories. Ordinary source
   # edits (including new directories) leave this store path unchanged.
   dependencyPaths = pkgs.lib.concatMap (file:
@@ -107,8 +108,9 @@ PY
   };
   # Assembly is self-contained Rust. No shell/stdenv setup or tool closure is
   # needed; only patches require Git. Keep arguments separate from shell syntax.
-  assemble = project: name: builtins.derivation {
+  assemble = project: name: shared: builtins.derivation {
     inherit name;
+    outputs = if shared then [ "out" "packages" ] else [ "out" ];
     inherit (drvjs.unwrapped) system;
     builder = "${drvjs.unwrapped}/bin/drvjs";
     preferLocalBuild = true;
@@ -117,9 +119,10 @@ PY
       (if unpackedStore == null && !useContents then sources else pkgs.writeText "unused-tarballs.json" "[]") ]
       ++ pkgs.lib.optionals (unpackedStore != null) [ "--unpacked-store" unpackedStore ]
       ++ pkgs.lib.optional keepVerificationStore "--keep-verification-store"
-      ++ pkgs.lib.optionals useContents [ "--package-contents" contentsManifest ];
+      ++ pkgs.lib.optionals useContents [ "--package-contents" contentsManifest ]
+      ++ pkgs.lib.optionals shared [ "--shared-packages" (builtins.placeholder "packages") ];
   };
-  dependencies = assemble dependencyProject "drvjs-dependencies";
+  dependencies = assemble dependencyProject "drvjs-dependencies" sharedDependencies;
   attached = builtins.derivation {
     name = "drvjs-node-modules";
     inherit (drvjs.unwrapped) system;
@@ -127,7 +130,7 @@ PY
     preferLocalBuild = true;
     args = [ "attach" ./project dependencies (builtins.placeholder "out") ];
   };
-in (if cacheDependencies then attached else assemble ./project "drvjs-node-modules") // {
+in (if cacheDependencies || sharedDependencies then attached else assemble ./project "drvjs-node-modules" false) // {
   inherit nativeBuildInputs tarballs packageContents contentsManifest dependencies dependencyProject;
   archiveSources = sources;
 }

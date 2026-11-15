@@ -6,6 +6,7 @@ mod native_store;
 mod package_cache;
 mod plan;
 mod pnpm;
+mod shared_store;
 mod verify;
 mod workspace;
 
@@ -51,6 +52,9 @@ enum Commands {
         /// Cache the installed dependency tree across workspace source edits.
         #[arg(long)]
         cache_dependencies: bool,
+        /// Share immutable registry packages between outputs (changes physical module paths).
+        #[arg(long)]
+        shared_dependencies: bool,
     },
     /// Import authenticated tarballs into Nix without storing credentials.
     Fetch {
@@ -74,6 +78,12 @@ enum Commands {
         #[arg(long)]
         store: Option<PathBuf>,
     },
+    /// Expand a shared installation into a standalone, writable directory.
+    Materialize {
+        directory: PathBuf,
+        #[arg(short, long)]
+        out: PathBuf,
+    },
     /// Internal Nix builder entry point.
     #[command(hide = true)]
     Assemble {
@@ -88,6 +98,9 @@ enum Commands {
         /// Internal manifest of immutable, Nix-built package contents.
         #[arg(long)]
         package_contents: Option<PathBuf>,
+        /// Internal second Nix output for a shared registry graph.
+        #[arg(long)]
+        shared_packages: Option<PathBuf>,
     },
     #[command(hide = true)]
     PreparePackage {
@@ -118,6 +131,7 @@ struct BuildOptions {
     zstd_archives: bool,
     cache_packages: bool,
     cache_dependencies: bool,
+    shared_dependencies: bool,
 }
 
 fn export(
@@ -174,6 +188,7 @@ fn export(
         ("src/fetch.rs", include_str!("fetch.rs")),
         ("src/plan.rs", include_str!("plan.rs")),
         ("src/pnpm.rs", include_str!("pnpm.rs")),
+        ("src/shared_store.rs", include_str!("shared_store.rs")),
         ("src/native.rs", include_str!("native.rs")),
         ("src/native_store.rs", include_str!("native_store.rs")),
         ("src/package_cache.rs", include_str!("package_cache.rs")),
@@ -206,6 +221,7 @@ fn main() {
             zstd_archives,
             cache_packages,
             cache_dependencies,
+            shared_dependencies,
         } => export(
             &directory,
             &out,
@@ -216,6 +232,7 @@ fn main() {
                 zstd_archives,
                 cache_packages,
                 cache_dependencies,
+                shared_dependencies,
             },
         ),
         Commands::Fetch {
@@ -232,6 +249,7 @@ fn main() {
             all_platforms,
         ),
         Commands::Verify { directory, store } => verify::verify(&directory, store.as_deref()),
+        Commands::Materialize { directory, out } => dependency_layer::materialize(&directory, &out),
         Commands::Assemble {
             source,
             out,
@@ -239,6 +257,7 @@ fn main() {
             keep_verification_store,
             unpacked_store,
             package_contents,
+            shared_packages,
         } => native::assemble(
             &source,
             &out,
@@ -246,7 +265,14 @@ fn main() {
             keep_verification_store,
             unpacked_store.as_deref(),
             package_contents.as_deref(),
-        ),
+        )
+        .and_then(|()| {
+            if let Some(packages) = shared_packages {
+                shared_store::split(&out, &packages)
+            } else {
+                Ok(())
+            }
+        }),
         Commands::PreparePackage {
             archive,
             out,

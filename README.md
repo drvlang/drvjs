@@ -229,6 +229,66 @@ opt-in because initial builds and small projects may not benefit. It can be
 combined with `--cache-packages` to reuse extraction after dependency changes;
 retained verification stores, zstd archives, and external stores also work.
 
+### Shared registry graph for repeated transfers
+
+`--shared-dependencies` changes the output layout: immutable registry package
+instances live in a separate Nix output, and the workspace links to them.
+Source-only changes rebuild and transfer the workspace; they reuse the registry
+graph. Nix tracks that graph as a runtime reference, so copying or rooting the
+result also includes it. This is opt-in and implies the installed dependency
+cache.
+
+```sh
+drvjs export -C /path/to/project --shared-dependencies -o /tmp/shared-deps
+nix-build /tmp/shared-deps -o result
+# Equivalent for a current export:
+nix-build /tmp/shared-deps --arg sharedDependencies true -o result
+# Full closure, including the shared graph on the first publication:
+nix copy --to 'file:///tmp/drvjs-cache?compression=zstd&compression-level=3' ./result
+```
+
+Registry dependencies, peer contexts, aliases, registry hoists and executable
+shims stay together. Workspace dependencies still link to the current output's
+complete sources. Package files are neither stripped nor compressed in place.
+The first transfer includes both outputs; later source updates reuse the graph.
+A lockfile, manifest, patch, configuration or workspace-bin change invalidates
+it. `--cache-packages` can additionally reuse extraction across those changes.
+The graph is shared as a whole, not independently per package version.
+
+**Runtime boundary:** Node resolves registry modules to paths in the shared
+output, with shared module identity across outputs using the same graph.
+Registry packages cannot implicitly import workspace packages through
+ancestor hoists or assume that the application lives above their own directory.
+Explicit registry-to-workspace links are rejected. Normal workspace-to-workspace
+and workspace-to-registry imports work without a loader or Node flags. Tools
+which write into installed dependencies, depend on their exact physical paths,
+or need those implicit workspace lookups should use the standalone layout.
+
+Expand either layout into a standalone, writable directory when needed:
+
+```sh
+drvjs materialize result -o ./build-workspace
+```
+
+This copies registry files, restores relative package links and relocates bin
+shims and metadata; it leaves the immutable outputs unchanged. It also restores
+the ordinary pnpm lookup layout. `drvjs verify` expands shared outputs before
+its full comparison with an independent offline pnpm installation. That checks
+installed contents, modes and declared links; application runtime tests remain
+necessary for the physical-layout differences above.
+The destination must be a new directory outside the inputs. Paths containing
+quotes, backslashes, dollar signs, backticks, newlines or colons are rejected
+because generated bin shims cannot safely represent them.
+
+The `dependencies` build output contains only attachment metadata and links to
+`dependencies.packages`. Cache both build metadata and runtime packages for
+workers that will rebuild source revisions:
+
+```sh
+nix-build /tmp/shared-deps -A dependencies -o dependency-cache
+nix copy --to 'file:///tmp/drvjs-cache?compression=zstd&compression-level=3' ./dependency-cache
+```
+
 ### Package contents cache for CI
 
 `drvjs export --cache-packages` opts into package preparation in separate Nix
@@ -517,6 +577,62 @@ not require building Node or pnpm.
 existing project and tarball-manifest inputs. Downloads, export and Nix
 realization overhead should be measured separately. When comparing against an
 older native assembler, pass `--baseline-arg=--native`.
+
+### Shared graph measurements
+
+The [shared-graph measurements](benchmarks/shared-graph-2026-11-14.json) compare
+`f38d92c` with the shared layout on Vue v3.5.22, using the same compiler-sfc plus
+root-tools selection (611 registry instances, six importers). On x86_64-linux
+with an i7-1280P and four build cores, seven alternating source updates gave:
+
+| Metric | Direct | Copied dependency cache | Shared graph |
+|---|---:|---:|---:|
+| Source-update rebuild, median | 3.295 s | 2.984 s | **1.987 s** |
+| New compressed NAR payload per update, median | 50.360 MB | 50.360 MB | **1.134 MB** |
+| Local cache publication per update, median | 1.126 s | 1.136 s | **0.100 s** |
+| First complete compressed runtime closure | 50.358 MB | 50.358 MB | 50.474 MB |
+| Initial assembly with tools/archives cached, median of three | 3.331 s | 5.556 s | 4.904 s |
+
+The shared graph reduces repeated NAR payloads by **97.7%** and source-update
+build time by **40%** versus direct assembly (33% versus the copied cache).
+The workspace output is 4.03 MB uncompressed, with a separately referenced
+230.11 MB registry graph, versus a 233.54 MB standalone output. The first
+transfer includes both outputs and is nearly unchanged. Initial preparation is
+47% slower than direct assembly; this mode benefits repeated source revisions.
+Graph changes still require a new complete graph.
+Across the initial publication plus seven updates, the total NAR payload was
+58.4 MB versus 402.9 MB. Assembly alone fell from 0.394 s to 0.051 s in seven
+alternating runs, excluding graph preparation and all Nix overhead.
+
+Every cache publication includes all runtime references. Each mode starts with
+an empty local file cache using zstd level 3; subsequent revisions reuse its
+existing NARs. These are compressed payload sizes and local publication times,
+not remote network timings. Rebuild timing includes evaluation, attachment and
+NAR registration; tool compilation and archive downloads are excluded. Neither
+package contents nor workspace sources are stripped. Source-update builds keep
+both attachment metadata and the registry graph cached; publish `dependencies`
+as described above when rebuilding on fresh CI workers.
+
+To compare exported selections with your own graph and cache:
+
+```sh
+python3 benchmarks/cache-updates.py \
+  --case direct=/tmp/direct-export --case shared=/tmp/shared-export \
+  --runs 7 --out /tmp/transfer-results
+python3 benchmarks/rebuild.py \
+  --case direct=/tmp/direct-export --case shared=/tmp/shared-export \
+  --fresh --runs 3 --out /tmp/first-build-results
+```
+
+Expanded shared trees match all 2,523 / 21,935 / 25,880 entries of the standalone
+Vue subset / CI / full-workspace outputs, including file hashes, executable bits,
+directories and relative links. The CI selection passes independent offline
+pnpm verification. `tests/vue-shared.py` compares real builds of five Vue
+compiler packages, checks their byte-identical bundles and compiled SFC runtime,
+exercises SWC and Rollup native code, and runs 50 Vue tests with the shared graph.
+It accepts `--standalone RESULT --shared RESULT --out NEW-DIRECTORY` for built
+full-workspace outputs. These checks do not remove the shared-layout runtime
+limits described above.
 
 ### Further assembly and transfer improvements
 

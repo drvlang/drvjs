@@ -115,7 +115,17 @@ pub fn verify(directory: &Path, external_store: Option<&Path>) -> Result<()> {
     pnpm::install(tmp.path())?;
     pnpm::store_status(tmp.path())?;
 
-    let actual = snapshot(&directory)?;
+    // Shared installations intentionally have external instance directories.
+    // Expand only the links described by their format, then run the same full
+    // byte/mode/link comparison. Internal package links are never followed.
+    let materialized = tempfile::tempdir()?;
+    let actual = if crate::shared_store::root(&directory)?.is_some() {
+        let expanded = materialized.path().join("installation");
+        crate::dependency_layer::materialize(&directory, &expanded)?;
+        snapshot(&expanded)?
+    } else {
+        snapshot(&directory)?
+    };
     let expected = snapshot(tmp.path())?;
     let differences: Vec<_> = actual
         .keys()

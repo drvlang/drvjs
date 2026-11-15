@@ -71,6 +71,11 @@ with tempfile.TemporaryDirectory(prefix='drvjs-platforms-') as scratch:
                 files = {'native.node': b'x' * (2 * 1024 * 1024)} if name == 'native-musl' else {}
                 files.update({'index.js': f'module.exports = {code};\n'.encode(),
                               'nonce': root.name.encode(), 'package.json': json.dumps(manifest).encode()})
+                if name == 'peer-reader':
+                    # Root registry dependencies are not private-hoisted. Shared
+                    # packages must still find them through the graph's root.
+                    files['root.cjs'] = b"module.exports = require('shared');\n"
+                    files['root.mjs'] = b"import shared from 'shared'; export default shared;\n"
                 for filename, data in files.items():
                     header = tarfile.TarInfo('package/' + filename)
                     header.size, header.mode = len(data), 0o644
@@ -106,6 +111,8 @@ with tempfile.TemporaryDirectory(prefix='drvjs-platforms-') as scratch:
                 a.equal(require('shared'), 42);
                 a.equal(require('required'), 7);
                 a.equal(require('active-peer'), 2);
+                a.equal(require('active-peer/root.cjs'), 42);
+                import(require.resolve('active-peer/root.mjs')).then(m => a.equal(m.default, 42));
                 a.equal(fs.existsSync('node_modules/native-musl'), {str(included).lower()});
                 a.equal(fs.existsSync('node_modules/.pnpm/platform-child@1.0.0'), {str(included).lower()});
                 a.equal(fs.existsSync('node_modules/.pnpm/peer-reader@1.0.0_peer@1.0.0'), {str(included).lower()});
@@ -116,6 +123,9 @@ with tempfile.TemporaryDirectory(prefix='drvjs-platforms-') as scratch:
         run('drvjs', 'verify', str(retained))
         for options in [[], ['--arg', 'cachePackages', 'true'], ['--arg', 'zstdArchives', 'true'],
                         ['--arg', 'cacheDependencies', 'true'],
+                        ['--arg', 'sharedDependencies', 'true'],
+                        ['--arg', 'sharedDependencies', 'true', '--arg', 'zstdArchives', 'true'],
+                        ['--arg', 'sharedDependencies', 'true', '--arg', 'unpackedStore', str(retained / '.pnpm-store')],
                         ['--arg', 'cacheDependencies', 'true', '--arg', 'zstdArchives', 'true'],
                         ['--arg', 'cacheDependencies', 'true', '--arg', 'unpackedStore', str(retained / '.pnpm-store')]]:
             output = build(*options)

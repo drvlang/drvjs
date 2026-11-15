@@ -71,6 +71,7 @@ for trial in range(args.runs):
               graph = import export {};
               fresh = g: args: builtins.derivation {
                 inherit (g) name system builder;
+                outputs = g.outputs or [ "out" ];
                 inherit args;
                 PATH = g.PATH or "";
                 preferLocalBuild = true;
