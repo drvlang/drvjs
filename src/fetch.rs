@@ -138,10 +138,9 @@ pub fn hash_file(path: &Path, algorithm: &str) -> Result<String> {
     Ok(format!("{algorithm}-{digest}"))
 }
 
-pub fn complete_integrities(lock: &mut String, npmrc: Option<&Path>) -> Result<()> {
-    let mut data: serde_json::Value = serde_yaml_ng::from_str(lock)?;
+pub fn complete_integrities(lock: &mut serde_json::Value, npmrc: Option<&Path>) -> Result<bool> {
     let mut changed = false;
-    if let Some(packages) = data["packages"].as_object_mut() {
+    if let Some(packages) = lock.get_mut("packages").and_then(|p| p.as_object_mut()) {
         for package in packages.values_mut() {
             if package["resolution"].get("integrity").is_none() {
                 let address = package["resolution"]["tarball"]
@@ -155,10 +154,7 @@ pub fn complete_integrities(lock: &mut String, npmrc: Option<&Path>) -> Result<(
             }
         }
     }
-    if changed {
-        *lock = serde_yaml_ng::to_string(&data)?;
-    }
-    Ok(())
+    Ok(changed)
 }
 
 pub fn fetch(

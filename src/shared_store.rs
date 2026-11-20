@@ -119,7 +119,14 @@ pub fn split(layer: &Path, packages: &Path) -> Result<()> {
         if entry.file_type()?.is_dir() && entry.file_name() != "node_modules" {
             symlink(entry.path(), destination)?;
         } else {
-            dependency_layer::copy_installation(&entry.path(), &destination, &layer, &layer, None)?;
+            dependency_layer::copy_installation(
+                &entry.path(),
+                &destination,
+                &layer,
+                &layer,
+                None,
+                false,
+            )?;
         }
     }
     // Keep the workspace's original hoists in the attachment metadata, but no

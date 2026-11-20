@@ -5,6 +5,9 @@
     rev = "6b5e5b7a6631f065bf6908986990b37d845f847f";
     narHash = "sha256-smTKQXMLLStzc8zJevMCckbk3My7SvbbLmPYZUJJKW4=";
   }).outPath {},
+  drvjs ? import ./drvjs-src/nix/package.nix { inherit pkgs; },
+  project ? ./project,
+  plan ? builtins.fromJSON (builtins.readFile ./plan.json),
   unpackedStore ? null,
   cachePackages ? (builtins.fromJSON (builtins.readFile ./options.json)).cachePackages or false,
   cacheDependencies ? (builtins.fromJSON (builtins.readFile ./options.json)).cacheDependencies or false,
@@ -13,7 +16,6 @@
   keepVerificationStore ? (builtins.fromJSON (builtins.readFile ./options.json)).keepVerificationStore
 }:
 let
-  plan = builtins.fromJSON (builtins.readFile ./plan.json);
   active = builtins.listToAttrs (map (id: { name = id; value = true; })
     (plan.targetPackages.${pkgs.stdenv.hostPlatform.system} or
       ((map (p: p.id) plan.packages) ++ builtins.attrNames (plan.patches or {}))));
@@ -63,7 +65,6 @@ for source in sources:
 pathlib.Path(sys.argv[2]).write_text(json.dumps(sources))
 PY
   '';
-  drvjs = import ./drvjs-src/nix/package.nix { inherit pkgs; };
   # No project, lockfile, graph edges or peer suffixes enter these derivations.
   # A dependency update reuses the extraction of every unchanged package.
   contents = builtins.listToAttrs (map (package: {
@@ -82,7 +83,7 @@ PY
       builder = "${drvjs.unwrapped}/bin/drvjs";
       PATH = "${pkgs.gitMinimal}/bin";
       args = [ "patch-package" contents.${patch.base} (builtins.placeholder "out")
-        (builtins.path { path = ./project + "/${patch.path}"; name = "drvjs.patch"; }) patch.hash ];
+        (builtins.path { path = project + "/${patch.path}"; name = "drvjs.patch"; }) patch.hash ];
     }
   ) (pkgs.lib.filterAttrs (id: _: builtins.hasAttr id active) (plan.patches or {}));
   packageContents = contents // patchedContents;
@@ -100,11 +101,11 @@ PY
     in builtins.genList (i: pkgs.lib.concatStringsSep "/" (pkgs.lib.take (i + 1) parts)) (builtins.length parts)
   ) (plan.dependencyFiles or []);
   dependencyEntries = builtins.listToAttrs (map (name: { inherit name; value = true; }) dependencyPaths);
-  dependencyProject = if dependencyPaths == [] then ./project else builtins.path {
-    path = ./project;
+  dependencyProject = if dependencyPaths == [] then project else builtins.path {
+    path = project;
     name = "project";
-    filter = path: _: path == toString ./project || builtins.hasAttr
-      (pkgs.lib.removePrefix "${toString ./project}/" path) dependencyEntries;
+    filter = path: _: path == toString project || builtins.hasAttr
+      (pkgs.lib.removePrefix "${toString project}/" path) dependencyEntries;
   };
   # Assembly is self-contained Rust. No shell/stdenv setup or tool closure is
   # needed; only patches require Git. Keep arguments separate from shell syntax.
@@ -128,9 +129,9 @@ PY
     inherit (drvjs.unwrapped) system;
     builder = "${drvjs.unwrapped}/bin/drvjs";
     preferLocalBuild = true;
-    args = [ "attach" ./project dependencies (builtins.placeholder "out") ];
+    args = [ "attach" project dependencies (builtins.placeholder "out") ];
   };
-in (if cacheDependencies || sharedDependencies then attached else assemble ./project "drvjs-node-modules" false) // {
+in (if cacheDependencies || sharedDependencies then attached else assemble project "drvjs-node-modules" false) // {
   inherit nativeBuildInputs tarballs packageContents contentsManifest dependencies dependencyProject;
   archiveSources = sources;
 }

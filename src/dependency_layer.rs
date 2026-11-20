@@ -7,17 +7,12 @@ use serde_json::Value;
 use std::{
     collections::BTreeSet,
     fs,
-    os::unix::fs::symlink,
+    os::unix::fs::{PermissionsExt, symlink},
     path::{Component, Path, PathBuf},
 };
 use walkdir::WalkDir;
 
-pub fn files(project: &Path) -> Result<BTreeSet<String>> {
-    let lock: Value = serde_yaml_ng::from_slice(&fs::read(project.join("pnpm-lock.yaml"))?)?;
-    files_for_lock(project, &lock)
-}
-
-fn files_for_lock(project: &Path, lock: &Value) -> Result<BTreeSet<String>> {
+pub fn files_for_lock(project: &Path, lock: &Value) -> Result<BTreeSet<String>> {
     let mut paths: Vec<PathBuf> = [
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
@@ -76,18 +71,35 @@ fn files_for_lock(project: &Path, lock: &Value) -> Result<BTreeSet<String>> {
         .collect()
 }
 
-fn validate(source: &Path, layer: &Path) -> Result<Vec<PathBuf>> {
+struct LayerInputs {
+    importers: Vec<PathBuf>,
+    overlay: BTreeSet<String>,
+}
+
+fn validate(source: &Path, layer: &Path) -> Result<LayerInputs> {
     let mut expected: Value = serde_yaml_ng::from_slice(&fs::read(source.join("pnpm-lock.yaml"))?)?;
-    let actual: Value = serde_yaml_ng::from_slice(&fs::read(layer.join("pnpm-lock.yaml"))?)?;
     let paths = files_for_lock(source, &expected)?;
+    let importers = workspace::importer_paths_from_lock(&expected)?;
+    if source == layer {
+        return Ok(LayerInputs {
+            importers,
+            overlay: BTreeSet::new(),
+        });
+    }
+    let actual: Value = serde_yaml_ng::from_slice(&fs::read(layer.join("pnpm-lock.yaml"))?)?;
     ensure!(
         paths == files_for_lock(layer, &actual)?,
         "dependency layer input paths differ"
     );
     for path in &paths {
+        let input = layer.join(path);
+        ensure!(
+            input.canonicalize()? == input,
+            "unexpected symlink in layer input: {path}"
+        );
         if path != "pnpm-lock.yaml" {
             ensure!(
-                fs::read(source.join(path))? == fs::read(layer.join(path))?,
+                fs::read(source.join(path))? == fs::read(input)?,
                 "dependency layer input differs: {path}"
             );
         }
@@ -115,7 +127,10 @@ fn validate(source: &Path, layer: &Path) -> Result<Vec<PathBuf>> {
         }
     }
     ensure!(expected == actual, "dependency layer lockfile differs");
-    workspace::importer_paths_from_lock(&actual)
+    Ok(LayerInputs {
+        importers,
+        overlay: paths,
+    })
 }
 
 pub(crate) fn copy_installation(
@@ -124,6 +139,7 @@ pub(crate) fn copy_installation(
     old_root: &Path,
     new_root: &Path,
     shared: Option<&Path>,
+    writable: bool,
 ) -> Result<()> {
     for entry in WalkDir::new(source).follow_root_links(false) {
         let entry = entry?;
@@ -164,7 +180,13 @@ pub(crate) fn copy_installation(
                         new_root.to_str().context("non-UTF8 output path")?,
                     ),
                 )?;
-                fs::set_permissions(destination, entry.metadata()?.permissions())?;
+                let mut permissions = entry.metadata()?.permissions();
+                if writable {
+                    permissions.set_mode(permissions.mode() | 0o200);
+                }
+                fs::set_permissions(destination, permissions)?;
+            } else if writable {
+                workspace::copy_writable(entry.path(), &destination)?;
             } else {
                 fs::copy(entry.path(), destination)?;
             }
@@ -177,26 +199,15 @@ pub fn attach(source: &Path, layer: &Path, out: &Path) -> Result<()> {
     restore(source, layer, out, true)
 }
 
-pub fn materialize(source: &Path, out: &Path) -> Result<()> {
-    restore(source, source, out, false)?;
-    use std::os::unix::fs::PermissionsExt;
-    for entry in WalkDir::new(out) {
-        let entry = entry?;
-        if entry.file_type().is_file() {
-            fs::set_permissions(
-                entry.path(),
-                fs::Permissions::from_mode(entry.metadata()?.permissions().mode() | 0o200),
-            )?;
-        }
-    }
-    Ok(())
+pub fn materialize(source: &Path, layer: &Path, out: &Path) -> Result<()> {
+    restore(source, layer, out, false)
 }
 
 fn restore(source: &Path, layer: &Path, out: &Path, share: bool) -> Result<()> {
     let started = std::time::Instant::now();
     let source = source.canonicalize()?;
     let layer = layer.canonicalize()?;
-    let importers = validate(&source, &layer)?;
+    let inputs = validate(&source, &layer)?;
     let shared = crate::shared_store::root(&layer)?;
     ensure!(!out.exists(), "output already exists");
     let parent = out
@@ -224,13 +235,43 @@ fn restore(source: &Path, layer: &Path, out: &Path, share: bool) -> Result<()> {
                 .is_none_or(|root| !destination.starts_with(root)),
         "output must be outside the source and dependency inputs"
     );
-    fs::create_dir(out)?;
-    let out = out.canonicalize()?;
-    workspace::copy_tree(&source, &out)?;
-    // Preserve the completed lockfile and executable modes of workspace bins.
-    workspace::copy_tree(&layer, &out)?;
+    fs::create_dir(&destination)?;
+    if let Err(err) = populate(
+        &source,
+        &layer,
+        &destination,
+        shared.as_deref(),
+        share,
+        inputs,
+    ) {
+        fs::remove_dir_all(&destination)
+            .with_context(|| format!("removing incomplete output after {err:#}"))?;
+        return Err(err);
+    }
+    eprintln!(
+        "drvjs: attached cached dependencies in {:.3}s",
+        started.elapsed().as_secs_f64()
+    );
+    Ok(())
+}
+
+fn populate(
+    source: &Path,
+    layer: &Path,
+    out: &Path,
+    shared: Option<&Path>,
+    share: bool,
+    inputs: LayerInputs,
+) -> Result<()> {
+    workspace::copy_tree(source, out)?;
+    // Assembly can complete the lockfile and make workspace bins executable.
+    // Ordinary sources always belong to the current project, even when the
+    // caller supplies a complete installation from an earlier revision.
+    for path in &inputs.overlay {
+        workspace::copy_writable(&layer.join(path), &out.join(path))?;
+    }
     let mut tasks = Vec::new();
-    for importer in importers {
+    for importer in inputs.importers {
         let modules = if importer == Path::new(".") {
             PathBuf::from("node_modules")
         } else {
@@ -258,19 +299,20 @@ fn restore(source: &Path, layer: &Path, out: &Path, share: bool) -> Result<()> {
             return Ok(());
         }
         if !share
-            && let Some(shared) = &shared
+            && let Some(shared) = shared
             && let Some(relative) = path.strip_prefix("node_modules").ok()
             && let Some(target) =
                 crate::shared_store::instance(&layer.join(path), relative, shared)?
         {
-            return copy_installation(&target, &out.join(path), shared, &out, None);
+            return copy_installation(&target, &out.join(path), shared, out, None, true);
         }
         copy_installation(
             &layer.join(path),
             &out.join(path),
-            &layer,
-            &out,
-            shared.as_deref(),
+            layer,
+            out,
+            shared,
+            !share,
         )
         .with_context(|| format!("copying dependency layer entry {}", path.display()))
     })?;
@@ -278,15 +320,12 @@ fn restore(source: &Path, layer: &Path, out: &Path, share: bool) -> Result<()> {
         copy_installation(
             &layer.join(".pnpm-store"),
             &out.join(".pnpm-store"),
-            &layer,
-            &out,
+            layer,
+            out,
             None,
+            !share,
         )?;
     }
-    eprintln!(
-        "drvjs: attached cached dependencies in {:.3}s",
-        started.elapsed().as_secs_f64()
-    );
     Ok(())
 }
 
@@ -311,6 +350,7 @@ mod tests {
                 &source,
                 &target,
                 None,
+                false,
             )
             .unwrap();
         }
@@ -340,7 +380,7 @@ mod tests {
         );
         let nested = source.join("nested");
         assert!(
-            materialize(&source, &nested)
+            materialize(&source, &source, &nested)
                 .unwrap_err()
                 .to_string()
                 .contains("outside")
@@ -348,10 +388,10 @@ mod tests {
         assert!(!nested.exists());
         let alias = root.path().join("alias");
         symlink(&source, &alias).unwrap();
-        assert!(materialize(&source, &alias.join("nested")).is_err());
+        assert!(materialize(&source, &source, &alias.join("nested")).is_err());
         assert!(!nested.exists());
         let unsafe_path = root.path().join("$expansion");
-        assert!(materialize(&source, &unsafe_path).is_err());
+        assert!(materialize(&source, &source, &unsafe_path).is_err());
         assert!(!unsafe_path.exists());
     }
 
@@ -365,18 +405,38 @@ mod tests {
             }),
         )
         .unwrap();
-        store::write_json(
-            &root.path().join("pnpm-lock.yaml"),
-            &json!({"importers":{".":{}}}),
-        )
-        .unwrap();
-        let before = files(root.path()).unwrap();
+        let lock = json!({"importers":{".":{}}});
+        store::write_json(&root.path().join("pnpm-lock.yaml"), &lock).unwrap();
+        let before = files_for_lock(root.path(), &lock).unwrap();
         fs::create_dir_all(root.path().join("node_modules/dep")).unwrap();
         fs::write(
             root.path().join("node_modules/dep/bin.js"),
             "#!/usr/bin/env node\n",
         )
         .unwrap();
-        assert_eq!(before, files(root.path()).unwrap());
+        assert_eq!(before, files_for_lock(root.path(), &lock).unwrap());
+    }
+
+    #[test]
+    fn materializing_a_failed_copy_leaves_the_destination_available_for_retry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("project");
+        let layer = tmp.path().join("layer");
+        let out = tmp.path().join("work");
+        fs::create_dir(&source).unwrap();
+        store::write_json(&source.join("package.json"), &json!({"name":"app"})).unwrap();
+        store::write_json(
+            &source.join("pnpm-lock.yaml"),
+            &json!({"importers":{".":{}}}),
+        )
+        .unwrap();
+        workspace::copy_tree(&source, &layer).unwrap();
+        fs::write(layer.join("deleted.js"), "old revision").unwrap();
+        symlink("package.json", source.join("unsupported")).unwrap();
+        assert!(materialize(&source, &layer, &out).is_err());
+        assert!(!out.exists());
+        fs::remove_file(source.join("unsupported")).unwrap();
+        materialize(&source, &layer, &out).unwrap();
+        assert!(!out.join("deleted.js").exists());
     }
 }

@@ -9,7 +9,7 @@ let
     name = "drvjs-${version}-unwrapped";
     src = pkgs.lib.fileset.toSource {
       root = ../.;
-      fileset = pkgs.lib.fileset.unions [ ../Cargo.toml ../Cargo.lock ../src ../nix ];
+      fileset = pkgs.lib.fileset.unions [ ../Cargo.toml ../Cargo.lock ../src ./build.nix ./package.nix ];
     };
     cargoLock.lockFile = ../Cargo.lock;
     nativeCheckInputs = [ pkgs.gitMinimal ];

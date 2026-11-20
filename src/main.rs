@@ -1,3 +1,4 @@
+mod commands;
 mod config;
 mod dependency_layer;
 mod fetch;
@@ -11,7 +12,8 @@ mod verify;
 mod workspace;
 
 use anyhow::{Context, Result, ensure};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
+use commands::{Execution, Project};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -29,32 +31,48 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Export {
-        #[arg(short = 'C', long, default_value = ".")]
-        directory: PathBuf,
-        #[arg(short, long)]
+    /// Build a project with its locked node_modules tree.
+    Build {
+        #[command(flatten)]
+        project: Project,
+        /// Nix output symlink (relative to the project).
+        #[arg(short, long, default_value = "result")]
         out: PathBuf,
-        /// Exact workspace name or relative path; dependencies are included. Repeat to select several.
-        #[arg(long = "filter")]
+    },
+    /// Run the start script in a writable copy of the built project.
+    Run {
+        #[command(flatten)]
+        execution: Execution,
+        /// Package script to run.
+        #[arg(long, default_value = "start")]
+        script: String,
+    },
+    /// Run the test script in a writable copy of the built project.
+    Test(Execution),
+    /// Write a standalone Nix build (defaults to .drvjs in the project).
+    Export {
+        #[command(flatten)]
+        project: Project,
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Include application sources for a single-package project.
+        #[arg(long)]
+        include_sources: bool,
+    },
+    #[command(hide = true)]
+    WorkspaceInfo {
+        directory: PathBuf,
+        #[arg(long)]
+        list: bool,
         filters: Vec<String>,
-        /// Host-only credentials for URL dependencies that have no integrity hash.
-        #[arg(long)]
-        npmrc: Option<PathBuf>,
-        /// Retain pnpm's package store for later offline `drvjs verify`.
-        #[arg(long)]
-        keep_verification_store: bool,
-        /// Cache zstd-normalized archives in Nix (experimental).
-        #[arg(long)]
-        zstd_archives: bool,
-        /// Cache extracted packages independently for repeated CI builds.
-        #[arg(long)]
-        cache_packages: bool,
-        /// Cache the installed dependency tree across workspace source edits.
-        #[arg(long)]
-        cache_dependencies: bool,
-        /// Share immutable registry packages between outputs (changes physical module paths).
-        #[arg(long)]
-        shared_dependencies: bool,
+    },
+    #[command(hide = true)]
+    RunScript {
+        installation: PathBuf,
+        importer: PathBuf,
+        script: String,
+        #[arg(last = true)]
+        args: Vec<std::ffi::OsString>,
     },
     /// Import authenticated tarballs into Nix without storing credentials.
     Fetch {
@@ -78,9 +96,12 @@ enum Commands {
         #[arg(long)]
         store: Option<PathBuf>,
     },
-    /// Expand a shared installation into a standalone, writable directory.
+    /// Copy an installation or cached dependency layer into a standalone, writable workspace.
     Materialize {
         directory: PathBuf,
+        /// Use the current export's project/ directory with a matching dependencies layer.
+        #[arg(long)]
+        project: Option<PathBuf>,
         #[arg(short, long)]
         out: PathBuf,
     },
@@ -124,29 +145,51 @@ enum Commands {
     },
 }
 
-#[derive(serde::Serialize)]
+#[derive(Args, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BuildOptions {
+    /// Retain pnpm's package store for later offline `drvjs verify`.
+    #[arg(long)]
     keep_verification_store: bool,
+    /// Cache zstd-normalized archives in Nix (experimental).
+    #[arg(long)]
     zstd_archives: bool,
+    /// Cache extracted packages independently for repeated CI builds.
+    #[arg(long)]
     cache_packages: bool,
+    /// Cache the installed dependency tree across workspace source edits.
+    #[arg(long)]
     cache_dependencies: bool,
+    /// Share immutable registry packages between outputs (changes physical module paths).
+    #[arg(long)]
     shared_dependencies: bool,
 }
 
+struct Exported {
+    primary: String,
+    importers: usize,
+    packages: usize,
+}
+
 fn export(
-    project: &Path,
+    args: &Project,
     out: &Path,
-    filters: &[String],
-    npmrc: Option<&Path>,
-    options: BuildOptions,
-) -> Result<()> {
-    let project = project.canonicalize()?;
-    let lock = fs::read_to_string(project.join("pnpm-lock.yaml"))?;
-    let mut selection = workspace::select(&project, &lock, filters)?;
-    fetch::complete_integrities(&mut selection.lock, npmrc)?;
+    include_sources: bool,
+    out_link: Option<&Path>,
+) -> Result<Exported> {
+    let project = args.directory.canonicalize()?;
+    let lock = workspace::read_lock(&project)?;
+    let filters = args.selectors();
+    let mut selection = workspace::select(&project, &lock, &filters)?;
+    let updated = fetch::complete_integrities(&mut selection.lock, args.npmrc.as_deref())?;
+    // An unfiltered, single-package export preserves even comments and formatting.
+    let lock_yaml = if !updated && filters.is_empty() && selection.config.is_none() {
+        lock
+    } else {
+        serde_yaml_ng::to_string(&selection.lock)?
+    };
     let settings = config::npmrc(&project)?;
-    let mut plan = plan::parse_with_registry(&selection.lock, &settings)?;
+    let mut plan = plan::parse_with_registry(&lock_yaml, &settings)?;
     ensure!(
         !out.exists(),
         "export destination already exists: {}",
@@ -159,16 +202,24 @@ fn export(
         .unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
     let stage = tempfile::tempdir_in(parent)?;
-    workspace::write_project(&project, &stage.path().join("project"), &selection)?;
-    plan.target_packages = native::target_packages(&stage.path().join("project"))?;
-    plan.dependency_files = dependency_layer::files(&stage.path().join("project"))?;
+    let projected = stage.path().join("project");
+    workspace::write_project(
+        &project,
+        &projected,
+        &selection,
+        &lock_yaml,
+        include_sources,
+        out_link,
+    )?;
+    plan.target_packages = native::target_packages(&projected, &selection.lock)?;
+    plan.dependency_files = dependency_layer::files_for_lock(&projected, &selection.lock)?;
     fs::write(
         stage.path().join("plan.json"),
         serde_json::to_vec_pretty(&plan)?,
     )?;
     fs::write(
         stage.path().join("options.json"),
-        serde_json::to_vec_pretty(&options)?,
+        serde_json::to_vec_pretty(&args.options)?,
     )?;
     fs::write(
         stage.path().join("default.nix"),
@@ -180,6 +231,7 @@ fn export(
         ("Cargo.toml", include_str!("../Cargo.toml")),
         ("Cargo.lock", include_str!("../Cargo.lock")),
         ("src/main.rs", include_str!("main.rs")),
+        ("src/commands.rs", include_str!("commands.rs")),
         ("src/config.rs", include_str!("config.rs")),
         (
             "src/dependency_layer.rs",
@@ -201,40 +253,44 @@ fn export(
         fs::write(stage.path().join("drvjs-src").join(name), content)?;
     }
     fs::rename(stage.path(), out)?;
-    println!(
-        "Exported {} workspace importers and {} locked packages to {}",
-        selection.importers.len(),
-        plan.packages.len(),
-        out.display()
-    );
-    Ok(())
+    Ok(Exported {
+        primary: selection.primary,
+        importers: selection.importers.len(),
+        packages: plan.packages.len(),
+    })
 }
 
 fn main() {
     let result = match Cli::parse().command {
+        Commands::Build { project, out } => commands::build(&project, &out),
+        Commands::Run { execution, script } => execution.run(&script),
+        Commands::Test(execution) => execution.run("test"),
         Commands::Export {
-            directory,
+            project,
             out,
+            include_sources,
+        } => {
+            let out = out.unwrap_or_else(|| project.directory.join(".drvjs"));
+            export(&project, &out, include_sources, None).map(|graph| {
+                println!(
+                    "Exported {} workspace importers and {} locked packages to {}",
+                    graph.importers,
+                    graph.packages,
+                    out.display()
+                );
+            })
+        }
+        Commands::WorkspaceInfo {
+            directory,
+            list,
             filters,
-            npmrc,
-            keep_verification_store,
-            zstd_archives,
-            cache_packages,
-            cache_dependencies,
-            shared_dependencies,
-        } => export(
-            &directory,
-            &out,
-            &filters,
-            npmrc.as_deref(),
-            BuildOptions {
-                keep_verification_store,
-                zstd_archives,
-                cache_packages,
-                cache_dependencies,
-                shared_dependencies,
-            },
-        ),
+        } => commands::workspace_info(&directory, list, &filters),
+        Commands::RunScript {
+            installation,
+            importer,
+            script,
+            args,
+        } => commands::run_script(&installation, &installation, &importer, &script, &args),
         Commands::Fetch {
             directory,
             npmrc,
@@ -249,7 +305,15 @@ fn main() {
             all_platforms,
         ),
         Commands::Verify { directory, store } => verify::verify(&directory, store.as_deref()),
-        Commands::Materialize { directory, out } => dependency_layer::materialize(&directory, &out),
+        Commands::Materialize {
+            directory,
+            project,
+            out,
+        } => dependency_layer::materialize(
+            project.as_deref().unwrap_or(&directory),
+            &directory,
+            &out,
+        ),
         Commands::Assemble {
             source,
             out,
@@ -289,6 +353,10 @@ fn main() {
     };
     if let Err(error) = result.context("drvjs failed") {
         eprintln!("{error:#}");
-        std::process::exit(1);
+        std::process::exit(
+            error
+                .downcast_ref::<commands::ChildExit>()
+                .map_or(1, |e| e.0),
+        );
     }
 }

@@ -121,7 +121,7 @@ pub fn verify(directory: &Path, external_store: Option<&Path>) -> Result<()> {
     let materialized = tempfile::tempdir()?;
     let actual = if crate::shared_store::root(&directory)?.is_some() {
         let expanded = materialized.path().join("installation");
-        crate::dependency_layer::materialize(&directory, &expanded)?;
+        crate::dependency_layer::materialize(&directory, &directory, &expanded)?;
         snapshot(&expanded)?
     } else {
         snapshot(&directory)?

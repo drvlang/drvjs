@@ -1,0 +1,172 @@
+{
+  "baseline_commit": "c4b9f65f9d557dc7f898623650c0fd70fba56d6f",
+  "project": "vuejs/core v3.5.22",
+  "project_revision": "5a8aa0b2ba575e098cbb63b396e9bcb751eb3a0f",
+  "environment": {
+    "platform": "x86_64-linux",
+    "cpu": "Intel i7-1280P",
+    "build_cores": 4,
+    "nix": "Determinate Nix 3.24.1 (Nix 2.35.3)",
+    "node": "24.19.0",
+    "vitest": "3.2.4"
+  },
+  "method": "benchmarks/ci-workspace.py, one untimed warmup per mode, then alternating order on successive source revisions. Both modes use --cache-dependencies and a fresh destination per job.",
+  "edit_file": "packages/compiler-sfc/src/index.ts",
+  "cases": [
+    {
+      "name": "compiler-sfc and root tools",
+      "filters": [
+        "@vue/compiler-sfc",
+        "."
+      ],
+      "package_instances": 611,
+      "substitution_enabled": true,
+      "command": [],
+      "baseline": {
+        "median_seconds": {
+          "export": 0.047859,
+          "nix": 2.651998,
+          "materialize": 0.201879,
+          "total": 2.900006,
+          "ready": 2.900006,
+          "command": 0.0
+        },
+        "total_seconds_by_trial": [
+          2.913862,
+          2.878505,
+          2.873136,
+          3.003492,
+          2.749497,
+          2.684318,
+          2.906468,
+          2.940519,
+          2.900006
+        ]
+      },
+      "optimized": {
+        "median_seconds": {
+          "export": 0.028242,
+          "nix": 0.334251,
+          "materialize": 0.147956,
+          "total": 0.507434,
+          "ready": 0.507434,
+          "command": 0.0
+        },
+        "total_seconds_by_trial": [
+          0.523161,
+          0.578164,
+          0.461376,
+          0.507434,
+          0.517457,
+          0.502532,
+          0.496461,
+          0.536822,
+          0.504774
+        ]
+      }
+    },
+    {
+      "name": "full workspace with tests",
+      "filters": [],
+      "package_instances": 631,
+      "substitution_enabled": true,
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--project",
+        "unit",
+        "--maxWorkers",
+        "4",
+        "packages/compiler-sfc/__tests__/parse.spec.ts",
+        "packages/compiler-sfc/__tests__/compileTemplate.spec.ts"
+      ],
+      "baseline": {
+        "median_seconds": {
+          "export": 0.055169,
+          "nix": 2.699466,
+          "materialize": 0.256324,
+          "ready": 3.028621,
+          "command": 1.267054,
+          "total": 4.308259
+        },
+        "total_seconds_by_trial": [
+          4.403778,
+          4.893744,
+          4.49248,
+          4.200842,
+          4.474968,
+          4.283701,
+          4.308259,
+          4.272572,
+          4.283306
+        ]
+      },
+      "optimized": {
+        "median_seconds": {
+          "export": 0.033706,
+          "nix": 0.339402,
+          "materialize": 0.161115,
+          "ready": 0.536879,
+          "command": 1.266444,
+          "total": 1.803323
+        },
+        "total_seconds_by_trial": [
+          1.830533,
+          1.76407,
+          1.815626,
+          1.779775,
+          1.803323,
+          1.913416,
+          1.800875,
+          1.843809,
+          1.790395
+        ]
+      }
+    },
+    {
+      "name": "compiler-sfc and root tools, local store only",
+      "filters": [
+        "@vue/compiler-sfc",
+        "."
+      ],
+      "package_instances": 611,
+      "substitution_enabled": false,
+      "command": [],
+      "baseline": {
+        "median_seconds": {
+          "export": 0.046716,
+          "nix": 1.12987,
+          "materialize": 0.219702,
+          "ready": 1.421788,
+          "command": 0.0,
+          "total": 1.421788
+        },
+        "total_seconds_by_trial": [
+          1.421788,
+          1.347908,
+          1.434653,
+          1.342949,
+          1.459508
+        ]
+      },
+      "optimized": {
+        "median_seconds": {
+          "export": 0.028995,
+          "nix": 0.325534,
+          "materialize": 0.142306,
+          "ready": 0.499987,
+          "command": 0.0,
+          "total": 0.499987
+        },
+        "total_seconds_by_trial": [
+          0.499987,
+          0.572577,
+          0.478823,
+          0.534784,
+          0.478549
+        ]
+      }
+    }
+  ]
+}

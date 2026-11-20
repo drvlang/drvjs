@@ -410,14 +410,11 @@ fn skipped_packages(lock: &Value, settings: &Value, arch: &str) -> Result<BTreeS
         .unwrap_or(&empty)
         .as_object()
         .context("invalid packages")?;
-    let mut skipped = BTreeSet::new();
-    for (id, meta) in package_metadata {
-        if !supported(meta, settings, arch) {
-            for s in snapshot.keys().filter(|s| base_id(s) == id) {
-                skipped.insert(s.clone());
-            }
-        }
-    }
+    let unsupported: BTreeSet<_> = package_metadata
+        .iter()
+        .filter(|(_, meta)| !supported(meta, settings, arch))
+        .map(|(id, _)| id.as_str())
+        .collect();
     // Optional packages reachable only through an incompatible platform package
     // are skipped too; they need not be present in a host-specific seed store.
     let mut reachable = BTreeSet::new();
@@ -430,29 +427,30 @@ fn skipped_packages(lock: &Value, settings: &Value, arch: &str) -> Result<BTreeS
         todo.extend(dependencies(importer, true).into_values());
     }
     while let Some(id) = todo.pop_front() {
-        if id.starts_with("link:") || skipped.contains(&id) || !reachable.insert(id.clone()) {
+        if id.starts_with("link:") || reachable.contains(&id) {
             continue;
         }
         let package = snapshot
             .get(&id)
             .with_context(|| format!("missing snapshot: {id}"))?;
+        if unsupported.contains(base_id(&id)) {
+            continue;
+        }
+        reachable.insert(id);
         todo.extend(dependencies(package, false).into_values());
     }
-    skipped.extend(
-        snapshot
-            .keys()
-            .filter(|id| !reachable.contains(*id))
-            .cloned(),
-    );
-    Ok(skipped)
+    Ok(snapshot
+        .keys()
+        .filter(|id| !reachable.contains(*id))
+        .cloned()
+        .collect())
 }
 
-pub fn target_packages(source: &Path) -> Result<BTreeMap<String, BTreeSet<String>>> {
-    let lock: Value = serde_yaml_ng::from_slice(&fs::read(source.join("pnpm-lock.yaml"))?)?;
+pub fn target_packages(source: &Path, lock: &Value) -> Result<BTreeMap<String, BTreeSet<String>>> {
     let (settings, _, _) = settings(source)?;
     let mut targets = BTreeMap::new();
     for (system, arch) in [("x86_64-linux", "x64"), ("aarch64-linux", "arm64")] {
-        let skipped = skipped_packages(&lock, &settings, arch)?;
+        let skipped = skipped_packages(lock, &settings, arch)?;
         let ids = lock["snapshots"]
             .as_object()
             .into_iter()
@@ -1296,8 +1294,7 @@ mod tests {
         lock["snapshots"]["child@1.0.0(patch_hash=abc)"] = json!({});
         let root = tempfile::tempdir().unwrap();
         fs::write(root.path().join("package.json"), "{\"name\":\"targets\"}").unwrap();
-        fs::write(root.path().join("pnpm-lock.yaml"), lock.to_string()).unwrap();
-        let targets = target_packages(root.path()).unwrap();
+        let targets = target_packages(root.path(), &lock).unwrap();
         assert_eq!(
             targets["x86_64-linux"],
             BTreeSet::from(["x64-only@1.0.0".into(), "child@1.0.0".into()])

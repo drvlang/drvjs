@@ -52,7 +52,7 @@ pub fn store_status(root: &Path) -> Result<()> {
     let lock = fs::read_to_string(root.join("pnpm-lock.yaml"))?;
     let mut data: Value = serde_yaml_ng::from_str(&lock)?;
     let tmp = tempfile::tempdir()?;
-    crate::workspace::copy_support(root, tmp.path(), &lock)?;
+    crate::workspace::copy_support(root, tmp.path(), &data)?;
     if let Some(snapshots) = data["snapshots"].as_object_mut() {
         snapshots.retain(|id, _| !id.contains("(patch_hash="));
     }

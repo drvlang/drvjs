@@ -9,11 +9,12 @@ use std::{
 use walkdir::WalkDir;
 
 pub struct Selection {
-    pub lock: String,
+    pub lock: Value,
     pub config: Option<Value>,
     pub manifests: BTreeMap<String, Value>,
     pub importers: BTreeSet<String>,
     pub all_importers: BTreeSet<String>,
+    pub primary: String,
 }
 
 fn normalized(base: &str, relative: &str) -> Result<String> {
@@ -54,6 +55,11 @@ fn edges(value: &Value, importer: bool) -> Result<Vec<(String, String)>> {
         }
     }
     Ok(result)
+}
+
+pub fn read_lock(project: &Path) -> Result<String> {
+    let path = project.join("pnpm-lock.yaml");
+    fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))
 }
 
 pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selection> {
@@ -114,28 +120,36 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
     }
     let all_importers: BTreeSet<_> = importers.keys().cloned().collect();
     let mut queue = VecDeque::new();
+    let mut primary = ".".to_owned();
     if filters.is_empty() {
         for path in importers.keys() {
             queue.push_back((true, path.clone()));
         }
     } else {
-        for filter in filters {
-            // Exact names or relative paths; closure is always included.
+        for (i, filter) in filters.iter().enumerate() {
+            // An explicit relative path disambiguates a colliding package name.
             let name = filter.strip_suffix("...").unwrap_or(filter);
+            let path = name.trim_start_matches("./");
+            let path = if path.is_empty() && name.starts_with("./") {
+                "."
+            } else {
+                path
+            };
             let matches: Vec<_> = manifests
                 .iter()
-                .filter(|(path, manifest)| {
-                    path.as_str() == name.trim_start_matches("./")
-                        || (name == "." && path.as_str() == ".")
-                        || manifest["name"].as_str() == Some(name)
+                .filter(|(key, manifest)| {
+                    key.as_str() == path || manifest["name"].as_str() == Some(name)
                 })
-                .map(|(path, _)| path.clone())
+                .map(|(key, _)| key.clone())
                 .collect();
             ensure!(
                 matches.len() == 1,
                 "filter {filter:?} must match exactly one workspace name or path (matched {})",
                 matches.len()
             );
+            if i == 0 {
+                primary.clone_from(&matches[0]);
+            }
             queue.push_back((true, matches[0].clone()));
         }
     }
@@ -197,11 +211,12 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
     // Full single-package exports preserve the original lock bytes for backwards compatibility.
     if config.is_none() && filters.is_empty() {
         return Ok(Selection {
-            lock: input.into(),
+            lock,
             config,
             manifests,
             importers: selected,
             all_importers,
+            primary,
         });
     }
     let package_ids: BTreeSet<_> = reached
@@ -349,12 +364,23 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
         }
     }
     Ok(Selection {
-        lock: serde_yaml_ng::to_string(&lock)?,
+        lock,
         config,
         manifests,
         importers: selected,
         all_importers,
+        primary,
     })
+}
+
+pub fn copy_writable(source: &Path, destination: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::copy(source, destination)?;
+    let mode = fs::metadata(destination)?.permissions().mode();
+    if mode & 0o200 == 0 {
+        fs::set_permissions(destination, fs::Permissions::from_mode(mode | 0o200))?;
+    }
+    Ok(())
 }
 
 pub fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
@@ -373,30 +399,36 @@ pub fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
                 "workspace source symlinks are not yet supported: {}",
                 entry.path().display()
             );
-            fs::copy(entry.path(), &target)?;
-            // Store inputs are immutable; scratch reconstructions must be writable.
-            use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(&target)?.permissions().mode() | 0o200;
-            fs::set_permissions(target, fs::Permissions::from_mode(mode))?;
+            copy_writable(entry.path(), &target)?;
         }
     }
     Ok(())
 }
 
-pub fn write_project(project: &Path, output: &Path, selection: &Selection) -> Result<()> {
+pub fn write_project(
+    project: &Path,
+    output: &Path,
+    selection: &Selection,
+    lock_yaml: &str,
+    include_sources: bool,
+    out_link: Option<&Path>,
+) -> Result<()> {
     fs::create_dir_all(output)?;
     let staging_root = output
         .parent()
         .context("missing staging directory")?
         .canonicalize()?;
+    let default_export = project.join(".drvjs");
+    let default_link = project.join("result");
     for path in selection
         .importers
         .iter()
-        .filter(|_| selection.config.is_some())
+        .filter(|_| include_sources || selection.config.is_some())
     {
         // Each workspace gets its own sources; skip nested importers and build
         // outputs so selecting a parent cannot accidentally capture siblings.
         let source = project.join(path);
+        let manifest = source.join("package.json");
         for entry in WalkDir::new(&source).into_iter().filter_entry(|entry| {
             if ["node_modules", ".pnpm-store", ".git", ".npmrc"]
                 .iter()
@@ -404,7 +436,21 @@ pub fn write_project(project: &Path, output: &Path, selection: &Selection) -> Re
             {
                 return false;
             }
-            if entry.path().starts_with(&staging_root) {
+            let path = entry.path();
+            if entry.file_type().is_symlink() {
+                // A previous build may have used a custom -o link. Recognize
+                // the Nix output even if a garbage collection removed its target.
+                let installed = fs::read_link(path).is_ok_and(|target| {
+                    target.is_absolute()
+                        && target.file_name().is_some_and(|name| {
+                            name.as_encoded_bytes().ends_with(b"-drvjs-node-modules")
+                        })
+                });
+                if installed || path == default_link || Some(path) == out_link {
+                    return false;
+                }
+            }
+            if path == default_export || path.starts_with(&staging_root) {
                 return false;
             }
             if entry.path() == source {
@@ -425,8 +471,8 @@ pub fn write_project(project: &Path, output: &Path, selection: &Selection) -> Re
             {
                 continue;
             }
-            // A single project only needs its manifest to install dependencies.
-            if selection.config.is_none() && relative != Path::new("package.json") {
+            // Projected manifests are written below, including for read-only flake sources.
+            if entry.path() == manifest {
                 continue;
             }
             let target = output.join(relative);
@@ -463,7 +509,7 @@ pub fn write_project(project: &Path, output: &Path, selection: &Selection) -> Re
         )?;
     }
     copy_support(project, output, &selection.lock)?;
-    fs::write(output.join("pnpm-lock.yaml"), &selection.lock)?;
+    fs::write(output.join("pnpm-lock.yaml"), lock_yaml)?;
     if let Some(config) = &selection.config {
         fs::write(
             output.join("pnpm-workspace.yaml"),
@@ -473,14 +519,13 @@ pub fn write_project(project: &Path, output: &Path, selection: &Selection) -> Re
     Ok(())
 }
 
-pub fn copy_support(project: &Path, output: &Path, lock: &str) -> Result<()> {
-    let data: Value = serde_yaml_ng::from_str(lock)?;
+pub fn copy_support(project: &Path, output: &Path, lock: &Value) -> Result<()> {
     let mut paths = vec![
         "package.json".to_owned(),
         "pnpm-workspace.yaml".into(),
         ".pnpmfile.cjs".into(),
     ];
-    if let Some(patches) = data["patchedDependencies"].as_object() {
+    if let Some(patches) = lock["patchedDependencies"].as_object() {
         for patch in patches.values() {
             let relative = patch["path"].as_str().context("patch missing path")?;
             crate::config::safe_file(project, relative)
@@ -505,7 +550,7 @@ pub fn copy_support(project: &Path, output: &Path, lock: &str) -> Result<()> {
         let source = crate::config::safe_file(project, &relative)?;
         let target = output.join(relative);
         fs::create_dir_all(target.parent().unwrap())?;
-        fs::copy(source, target)?;
+        copy_writable(&source, &target)?;
     }
     Ok(())
 }
@@ -581,7 +626,7 @@ mod closure_tests {
             selected.importers,
             BTreeSet::from(["packages/a".into(), "packages/b".into()])
         );
-        let pruned: Value = serde_yaml_ng::from_str(&selected.lock).unwrap();
+        let pruned = selected.lock;
         assert_eq!(pruned["snapshots"].as_object().unwrap().len(), 3);
         assert!(pruned["packages"].get("unrelated@1.0.0").is_none());
         assert_eq!(pruned["importers"]["."], json!({}));
@@ -618,7 +663,7 @@ mod closure_tests {
             selection.manifests["."]["pnpm"]["patchedDependencies"],
             json!({"peer@2.0.0":"patches/peer.patch"})
         );
-        let projected: Value = serde_yaml_ng::from_str(&selection.lock).unwrap();
+        let projected = selection.lock;
         assert_eq!(
             projected["patchedDependencies"].as_object().unwrap().len(),
             1
@@ -644,7 +689,7 @@ mod closure_tests {
             &["packages/a".into(), ".".into()],
         )
         .unwrap();
-        let pruned: Value = serde_yaml_ng::from_str(&selected.lock).unwrap();
+        let pruned = selected.lock;
         assert!(pruned["packages"].get("unrelated@1.0.0").is_some());
         assert!(!selected.importers.contains("packages/other"));
     }
@@ -678,7 +723,15 @@ mod closure_tests {
             json!({"lockfileVersion":"9.0", "importers":{".":{}}, "packages":{}, "snapshots":{}});
         let selected = select(&canonical, &lock.to_string(), &[".".into()]).unwrap();
         let output = root.path().join(".staging/project");
-        write_project(&canonical, &output, &selected).unwrap();
+        write_project(
+            &canonical,
+            &output,
+            &selected,
+            &selected.lock.to_string(),
+            false,
+            None,
+        )
+        .unwrap();
         assert!(output.join("package.json").exists());
         assert!(!output.join(".staging").exists());
     }
@@ -701,7 +754,7 @@ mod closure_tests {
             selected.config.unwrap()["catalog"],
             json!({"real":"^1.0.0"})
         );
-        let pruned: Value = serde_yaml_ng::from_str(&selected.lock).unwrap();
+        let pruned = selected.lock;
         assert_eq!(pruned["catalogs"]["default"].as_object().unwrap().len(), 1);
     }
 }

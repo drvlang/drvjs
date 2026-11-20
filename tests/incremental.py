@@ -234,6 +234,21 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         assert run(str(shared_edit / 'packages/a/node_modules/.bin/workspace-tool')) == '51'
         assert (shared_edit / 'packages/b/new-directory/data.json').is_file()
         assert (build(source_edit) / 'packages/b/index.js').read_text() == '// included edit\n'
+        # CI can materialize the current sources directly from the installed
+        # layer. A full installation from an earlier revision is usable too.
+        shared_layer = build(source_edit, '-A', 'dependencies', '--arg', 'sharedDependencies', 'true')
+        for name, cached in [('standalone', layer), ('shared', shared_layer), ('previous', shared)]:
+            work = root / ('work-' + name)
+            run('drvjs', 'materialize', str(cached), '--project', str(source_edit / 'project'), '-o', str(work))
+            runtime(work, 1)
+            assert run(str(work / 'packages/a/node_modules/.bin/workspace-tool')) == '51'
+            assert (work / 'packages/b/new-directory/data.json').is_file()
+            assert not (work / 'node_modules/.drvjs-shared.json').exists()
+            assert not (work / 'node_modules/.pnpm/parent@1.0.0').is_symlink()
+            leaf = Path('node_modules/.pnpm/leaf@1.0.0/node_modules/leaf/index.js')
+            original_file = (cached / leaf).read_bytes()
+            (work / leaf).write_text('module.exports=99')
+            assert (cached / leaf).read_bytes() == original_file
         assert not requests
 
         # Same package content is reusable across separate workspace selections.
