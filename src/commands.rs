@@ -82,7 +82,9 @@ fn realize(project: &Project, graph: &Path, link: Option<&Path>, quiet: bool) ->
     } else {
         let local = Path::new(env!("CARGO_MANIFEST_DIR"));
         let flake = if local.join("flake.nix").is_file() {
-            format!("git+file://{}", local.display())
+            let url = url::Url::from_file_path(local)
+                .map_err(|_| anyhow::anyhow!("invalid checkout path: {}", local.display()))?;
+            format!("git+{url}?shallow=1")
         } else {
             "github:drvlang/drvjs".into()
         };
