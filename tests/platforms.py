@@ -131,7 +131,7 @@ with tempfile.TemporaryDirectory(prefix='drvjs-platforms-') as scratch:
             output = build(*options)
             check(output)
             run('drvjs', 'verify', str(output), '--store', str(retained / '.pnpm-store'))
-            build(*options, '--check')
+            run('bash', str(Path(__file__).with_name('rebuild.sh')), str(output), str(export), *options)
         assert (export / 'project/pnpm-lock.yaml').read_bytes() == original_lock
         # Reusing a retained store against the original, unenriched export works.
         seeded = root / 'seeded'

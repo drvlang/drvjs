@@ -28,7 +28,7 @@ assert.equal(require('node:fs').existsSync('node_modules/fsevents'), false);
 JS
 )
 test "$(bash "$result/node_modules/.bin/semver" 1.2.3)" = 1.2.3
-# A second realization must reuse the output; --check forces an independent
+# A second realization must reuse the output; the second recipe forces an independent
 # assembly and compares the NAR, including timestamps/links/metadata.
 test "$(nix-build "$scratch/export" --no-out-link --arg keepVerificationStore true)" = "$result"
 bash "$(dirname "$0")/rebuild.sh" "$result" "$scratch/export" --arg keepVerificationStore true
