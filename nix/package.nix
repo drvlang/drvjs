@@ -33,7 +33,7 @@ let
           dynamic = import ${dynamicFile} { inherit pkgs; };
         };
     in project.mkJsPackage ((builtins.fromJSON options) // { src = /. + directory; })
-  '').overrideAttrs (_: ca);
+  '').overrideAttrs (_: ca // { allowSubstitutes = true; });
 in pkgs.runCommand "drvjs-${version}" (ca // {
   nativeBuildInputs = [ pkgs.makeWrapper ];
   passthru = { inherit unwrapped; };

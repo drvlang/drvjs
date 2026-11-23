@@ -115,7 +115,12 @@ with tempfile.TemporaryDirectory(prefix="drvjs-commands-") as tmp:
                                  "--apply", "p: [ p.planner.drvPath p.drvPath ]"))
         return package + [nix("eval", "--raw", f'.#checks.{system}."@demo/api".drvPath')]
 
+    def dependency_plan():
+        return nix("build", f'.#packages.{system}."@demo/api".dependencies.planner',
+                   "--print-out-paths", "--no-link")
+
     original = api_drv()
+    original_plan = dependency_plan()
     write("apps/worker/start.js", "// sibling edit")
     write("docs/index.md", "irrelevant")
     write("notes.txt", "an unrelated top-level edit")
@@ -123,6 +128,14 @@ with tempfile.TemporaryDirectory(prefix="drvjs-commands-") as tmp:
     assert api_drv() == original
     write("libs/shared/index.js", "module.exports = 43")
     assert all(a != b for a, b in zip(original, api_drv()))
+    assert dependency_plan() == original_plan
+    shared_manifest = {"name": "shared", "main": "index.js", "bin": {"demo": "index.js"}}
+    write("libs/shared/package.json", shared_manifest)
+    with_bin = dependency_plan()
+    assert with_bin != original_plan
+    write("libs/shared/index.js", "module.exports = 43 // an edited workspace binary")
+    assert dependency_plan() != with_bin
+    write("libs/shared/package.json", {"name": "shared", "main": "index.js"})
     flake("mkMonorepoFlake", 'commands = { server = "./apps/api"; }; script = "report"; cacheDependencies = true;')
     assert nix("run", ".#server") == "43"
     write("flake.nix", """

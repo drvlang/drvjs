@@ -3,11 +3,11 @@
     "drvkit": {
       "flake": false,
       "locked": {
-        "lastModified": 1795437962,
-        "narHash": "sha256-kTaaR0g7EH0GFQp7RzzHt5h0Czk2n8DNZOUQkzSjvIw=",
+        "lastModified": 1795449854,
+        "narHash": "sha256-7adAPDpS7Pn+AUjVPGjGdCNi4ybxQZPqx82q2AexoMw=",
         "owner": "drvlang",
         "repo": "drvkit",
-        "rev": "66772c6f10cb7a0594c4427722fb9d94c79d0df2",
+        "rev": "fc2aadb4915c778eff1298b57733475b6ceab599",
         "type": "github"
       },
       "original": {

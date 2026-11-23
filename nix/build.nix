@@ -18,7 +18,7 @@
 let
   ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
   derivation = args: builtins.derivation (args // ca);
-  text = name: value: (pkgs.writeText name value).overrideAttrs (_: ca);
+  text = name: value: (pkgs.writeText name value).overrideAttrs (_: ca // { allowSubstitutes = true; });
   active = builtins.listToAttrs (map (id: { name = id; value = true; })
     (plan.targetPackages.${pkgs.stdenv.hostPlatform.system} or
       ((map (p: p.id) plan.packages) ++ builtins.attrNames (plan.patches or {}))));

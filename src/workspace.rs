@@ -490,7 +490,7 @@ pub fn write_project(
                     return false;
                 }
             }
-            if path == default_export || path.starts_with(&staging_root) {
+            if path == default_export || path == staging_root {
                 return false;
             }
             if entry.path() == source {

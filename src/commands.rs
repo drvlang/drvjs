@@ -123,10 +123,11 @@ impl Execution {
         let temp = tempfile::tempdir()?;
         let graph = temp.path().join("export");
         let installation = temp.path().join("installation");
-        let exported = export(&self.project, &graph, true, None, false)?;
+        let sources = temp.path().join("sources");
+        let exported = crate::project_inputs(&self.project, &sources, &graph)?;
         realize(&self.project, &graph, Some(&installation), true)?;
         run_script(
-            &graph.join("project"),
+            &sources,
             &installation,
             Path::new(&exported.primary),
             script,

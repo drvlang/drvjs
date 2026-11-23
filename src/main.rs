@@ -65,6 +65,16 @@ enum Commands {
         #[arg(long, hide = true)]
         plan_only: bool,
     },
+    /// Project application sources and dependency planning inputs into separate CA outputs.
+    #[command(hide = true)]
+    ProjectInputs {
+        #[command(flatten)]
+        project: Project,
+        #[arg(long)]
+        sources: PathBuf,
+        #[arg(long)]
+        graph: PathBuf,
+    },
     #[command(hide = true)]
     WorkspaceInfo {
         directory: PathBuf,
@@ -75,6 +85,8 @@ enum Commands {
     #[command(hide = true)]
     RunScript {
         installation: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
         importer: PathBuf,
         script: String,
         #[arg(last = true)]
@@ -175,11 +187,58 @@ struct Exported {
     primary: String,
     importers: usize,
     packages: usize,
+    dependency_files: std::collections::BTreeSet<String>,
 }
 
 fn export(
     args: &Project,
     out: &Path,
+    include_sources: bool,
+    out_link: Option<&Path>,
+    standalone: bool,
+) -> Result<Exported> {
+    ensure!(
+        !out.exists(),
+        "export destination already exists: {}",
+        out.display()
+    );
+    // Stage atomically so an unsuccessful export does not leave a usable-looking graph.
+    let parent = out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)?;
+    let stage = tempfile::tempdir_in(parent)?;
+    let projected = stage.path().join("project");
+    let written = write_export(
+        args,
+        stage.path(),
+        &projected,
+        include_sources,
+        out_link,
+        standalone,
+    )?;
+    fs::rename(stage.path(), out)?;
+    Ok(written)
+}
+
+fn project_inputs(args: &Project, sources: &Path, graph: &Path) -> Result<Exported> {
+    fs::create_dir(graph)?;
+    fs::create_dir(sources)?;
+    let written = write_export(args, graph, sources, true, None, false)?;
+    let metadata = graph.join("project");
+    for name in &written.dependency_files {
+        let target = metadata.join(name);
+        fs::create_dir_all(target.parent().context("dependency input has no parent")?)?;
+        fs::copy(sources.join(name), target)?;
+    }
+    Ok(written)
+}
+
+fn write_export(
+    args: &Project,
+    graph: &Path,
+    projected: &Path,
     include_sources: bool,
     out_link: Option<&Path>,
     standalone: bool,
@@ -216,44 +275,25 @@ fn export(
         serde_yaml_ng::to_string(&selection.lock)?
     };
     let mut plan = plan::from_lock(&selection.lock, &selection.npmrc)?;
-    ensure!(
-        !out.exists(),
-        "export destination already exists: {}",
-        out.display()
-    );
-    // Stage atomically so an unsuccessful export does not leave a usable-looking graph.
-    let parent = out
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    fs::create_dir_all(parent)?;
-    let stage = tempfile::tempdir_in(parent)?;
-    let projected = stage.path().join("project");
     workspace::write_project(
         &project,
-        &projected,
+        projected,
         &selection,
         &lock_yaml,
         include_sources,
         out_link,
     )?;
-    plan.target_packages = native::target_packages(&projected, &selection.lock)?;
-    plan.dependency_files = dependency_layer::files_for_lock(&projected, &selection.lock)?;
+    plan.target_packages = native::target_packages(projected, &selection.lock)?;
+    plan.dependency_files = dependency_layer::files_for_lock(projected, &selection.lock)?;
+    fs::write(graph.join("plan.json"), serde_json::to_vec_pretty(&plan)?)?;
     fs::write(
-        stage.path().join("plan.json"),
-        serde_json::to_vec_pretty(&plan)?,
-    )?;
-    fs::write(
-        stage.path().join("options.json"),
+        graph.join("options.json"),
         serde_json::to_vec_pretty(&args.options)?,
     )?;
-    fs::write(
-        stage.path().join("default.nix"),
-        include_str!("../nix/build.nix"),
-    )?;
+    fs::write(graph.join("default.nix"), include_str!("../nix/build.nix"))?;
     if standalone {
-        fs::create_dir_all(stage.path().join("drvjs-src/src"))?;
-        fs::create_dir_all(stage.path().join("drvjs-src/nix"))?;
+        fs::create_dir_all(graph.join("drvjs-src/src"))?;
+        fs::create_dir_all(graph.join("drvjs-src/nix"))?;
         for (name, content) in [
             ("Cargo.toml", include_str!("../Cargo.toml")),
             ("Cargo.lock", include_str!("../Cargo.lock")),
@@ -278,14 +318,14 @@ fn export(
             ("nix/build.nix", include_str!("../nix/build.nix")),
             ("nix/package.nix", include_str!("../nix/package.nix")),
         ] {
-            fs::write(stage.path().join("drvjs-src").join(name), content)?;
+            fs::write(graph.join("drvjs-src").join(name), content)?;
         }
     }
-    fs::rename(stage.path(), out)?;
     Ok(Exported {
         primary: selection.primary,
         importers: selection.importers.len(),
         packages: plan.packages.len(),
+        dependency_files: plan.dependency_files,
     })
 }
 
@@ -321,6 +361,11 @@ fn main() {
                 );
             })
         }
+        Commands::ProjectInputs {
+            project,
+            sources,
+            graph,
+        } => project_inputs(&project, &sources, &graph).map(|_| ()),
         Commands::WorkspaceInfo {
             directory,
             list,
@@ -328,10 +373,17 @@ fn main() {
         } => commands::workspace_info(&directory, list, &filters),
         Commands::RunScript {
             installation,
+            project,
             importer,
             script,
             args,
-        } => commands::run_script(&installation, &installation, &importer, &script, &args),
+        } => commands::run_script(
+            project.as_deref().unwrap_or(&installation),
+            &installation,
+            &importer,
+            &script,
+            &args,
+        ),
         Commands::Fetch {
             directory,
             npmrc,

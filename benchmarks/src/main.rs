@@ -11,6 +11,7 @@ fn main() -> Result<()> {
         Suite::CacheCompression(a) => cache::compression(a),
         Suite::CacheUpdates(a) => cache::updates(a),
         Suite::CiWorkspace(a) => project::workspace(a),
+        Suite::DynamicDependencies(a) => project::dynamic_dependencies(a),
         Suite::Closure(a) => cache::closure(a),
         Suite::CompareNative(a) => assembly::compare(a),
         Suite::Evaluate(a) => evaluation::evaluate(a),

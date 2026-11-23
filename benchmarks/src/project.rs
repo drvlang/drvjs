@@ -210,3 +210,113 @@ pub fn workspace(a: CiWorkspace) -> Result<()> {
         &json!({"project":a.project,"filters":a.filter,"edit_file":a.edit_file,"command":a.command,"samples":rows,"median_seconds":medians}),
     )
 }
+
+/// Compare the public dynamic dependency planner on actual application edits.
+pub fn dynamic_dependencies(a: crate::cli::DynamicDependencies) -> Result<()> {
+    ensure!(
+        a.edit_file
+            .components()
+            .all(|p| matches!(p, Component::Normal(_))),
+        "--edit-file must be inside the checkout"
+    );
+    let scratch = tempfile::tempdir()?;
+    let project = scratch.path().join("checkout");
+    checkout(&a.project, &project)?;
+    let edit = project.join(&a.edit_file);
+    ensure!(
+        edit.canonicalize()? == edit,
+        "edit file must be a regular project input"
+    );
+    let original = fs::read(&edit)?;
+    let roots = [
+        ("before", a.before.canonicalize()?),
+        ("after", a.after.canonicalize()?),
+    ];
+    let mut samples = BTreeMap::new();
+    let mut expected = None;
+    for trial in 0..=a.runs {
+        let mut changed = original.clone();
+        changed.extend(format!("\n// drvjs CI {} {trial}\n", scratch.path().display()).bytes());
+        fs::write(&edit, &changed)?;
+        for (label, root) in alternating(&roots, trial) {
+            let targets = if a.package_and_test {
+                "[ (tool.mkPackage args) (tool.mkTest args) ]"
+            } else {
+                "tool.mkPackage (args // { dependenciesOnly = true; })"
+            };
+            let expr = format!(
+                "let tool = (builtins.getFlake {}).lib; args = {{ src = /. + {}; system = builtins.currentSystem; filters = builtins.fromJSON {}; }}; in {targets}",
+                quote_path(&root)?, quote_path(&project)?, nix_string(&serde_json::to_string(&a.filter)?)
+            );
+            let (path, seconds) = measured(|| {
+                run(&argv![
+                    "nix",
+                    "build",
+                    "--impure",
+                    "--no-link",
+                    "--print-out-paths",
+                    "--option",
+                    "allow-import-from-derivation",
+                    "false",
+                    "--option",
+                    "substituters",
+                    "",
+                    "--option",
+                    "always-allow-substitutes",
+                    "false",
+                    "--option",
+                    "sandbox",
+                    "true",
+                    "--option",
+                    "sandbox-fallback",
+                    "false",
+                    "--expr",
+                    expr
+                ])
+            })?;
+            let outputs: Vec<_> = path.lines().map(Path::new).collect();
+            if a.package_and_test {
+                ensure!(outputs.len() == 2, "expected the package and its check");
+                let package = outputs
+                    .iter()
+                    .find(|out| out.join("pnpm-lock.yaml").is_file())
+                    .context("missing installed package")?;
+                ensure!(
+                    fs::read(package.join(&a.edit_file))? == changed,
+                    "installed source is stale"
+                );
+                let check = outputs
+                    .iter()
+                    .find(|out| *out != package)
+                    .context("missing test check")?
+                    .canonicalize()?;
+                ensure!(
+                    expected.get_or_insert_with(|| check.clone()) == &check,
+                    "check contents changed"
+                );
+            } else {
+                ensure!(outputs.len() == 1, "expected one dependency layer");
+                let resolved = outputs[0].canonicalize()?;
+                ensure!(
+                    resolved.join("pnpm-lock.yaml").is_file(),
+                    "missing installed lockfile"
+                );
+                ensure!(
+                    expected.get_or_insert_with(|| resolved.clone()) == &resolved,
+                    "dependency contents changed"
+                );
+            }
+            if trial != 0 {
+                samples.entry(label).or_insert_with(Vec::new).push(seconds);
+            }
+        }
+    }
+    let medians = samples
+        .iter()
+        .map(|(label, v)| Ok((*label, median(v.clone())?)))
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    pretty(
+        &json!({"runs":a.runs,"filter":a.filter,"edit_file":a.edit_file,
+        "package_and_test":a.package_and_test, "output":expected, "median_seconds":medians, "samples_seconds":samples}),
+    )
+}

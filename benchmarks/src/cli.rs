@@ -49,6 +49,25 @@ pub struct CiWorkspace {
 }
 
 #[derive(clap::Args)]
+pub struct DynamicDependencies {
+    #[arg(long)]
+    pub before: PathBuf,
+    #[arg(long)]
+    pub after: PathBuf,
+    #[arg(long)]
+    pub project: PathBuf,
+    #[arg(long)]
+    pub filter: Vec<String>,
+    #[arg(long)]
+    pub edit_file: PathBuf,
+    /// Realize the selected package and its test check together.
+    #[arg(long)]
+    pub package_and_test: bool,
+    #[arg(long, value_parser = positive, default_value_t = 5)]
+    pub runs: usize,
+}
+
+#[derive(clap::Args)]
 pub struct Closure {
     pub export: PathBuf,
     #[arg(long)]
@@ -188,6 +207,8 @@ pub enum Suite {
     CacheUpdates(CacheUpdates),
     /// Time export, writable workspace preparation and an optional CI command after source edits.
     CiWorkspace(CiWorkspace),
+    /// Compare the public Nix dependency build after selected application source edits.
+    DynamicDependencies(DynamicDependencies),
     /// Measure realized assembly inputs and their compressed binary-cache payload.
     Closure(Closure),
     /// Compare native installed trees, normalizing generated output-root paths only.

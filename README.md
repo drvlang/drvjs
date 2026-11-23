@@ -2,7 +2,7 @@
 
 drvjs builds a pnpm project's `node_modules` with Nix. Each locked npm tarball has its own store path, so a fresh CI runner can reuse unchanged packages from your binary cache. In a monorepo, you can build or test one workspace package together with the local packages it imports.
 
-Installed projects, dependency layers, and checks are content-addressed by default. Two builds that produce the same files and store references can reuse the same output path. To publish a cached build with its realisation information, use a derivation-aware copy such as `nix copy --to "$CACHE" .#app` from the consumer flake.
+Installed projects, dependency layers, and checks are content-addressed by default. Two builds that produce the same files and store references can reuse the same output path. Tests and apps reuse the installed dependency graph across source edits and run against the current application files. [CI cache guide](https://drvlang.org/monorepos/)
 
 ## Try it
 
