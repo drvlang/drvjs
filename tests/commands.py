@@ -24,7 +24,8 @@ with tempfile.TemporaryDirectory(prefix="drvjs-commands-") as tmp:
         return run("drvjs", *args, cwd=root, check=check)
 
     def nix(command, *args):
-        options = ["--no-write-lock-file", "--override-input", "drvjs", repo]
+        options = ["--no-write-lock-file", "--override-input", "drvjs", repo,
+                   "--option", "allow-import-from-derivation", "false"]
         if command == "flake":
             return run("nix", command, args[0], *options, *args[1:], cwd=root).stdout.strip()
         return run("nix", command, *options, *args, cwd=root).stdout.strip()
@@ -32,11 +33,13 @@ with tempfile.TemporaryDirectory(prefix="drvjs-commands-") as tmp:
     def flake(helper, extra=""):
         write("flake.nix", '''
         {
-          inputs.drvjs.url = "github:ryantm/drvjs";
+          inputs.drvjs.url = "github:drvlang/drvjs";
           outputs = { drvjs, ... }: drvjs.lib.HELPER {
-            src = builtins.path {
-              name = "js-source"; path = ./.;
-              filter = path: _: !(builtins.elem path (map toString [ ./docs ./flake.nix ./flake.lock ]));
+            src = drvjs.lib.projectSource {
+              root = ./.;
+              files = builtins.filter builtins.pathExists [
+                ./package.json ./pnpm-lock.yaml ./pnpm-workspace.yaml ./start.js ./test.js ./apps ./libs
+              ];
             };
             EXTRA
           };
@@ -101,19 +104,41 @@ with tempfile.TemporaryDirectory(prefix="drvjs-commands-") as tmp:
     assert compare(nix("run", ".#@demo/api", "--", "via nix"), "via nix")
     assert compare(cli("test", "@demo/api", "--", "via cli").stdout, "via cli")
     cli("build", "./apps/api")
-    assert (root / "result").resolve() == output
+    assert (root / "result").resolve() == output.resolve(), ((root / "result").resolve(), output.resolve())
 
     def api_drv():
-        return json.loads(nix("eval", "--json", f'.#packages.{system}."@demo/api"',
-                              "--apply", "p: [ p.planner.drvPath p.drvPath ]"))
+        package = json.loads(nix("eval", "--json", f'.#packages.{system}."@demo/api"',
+                                 "--apply", "p: [ p.planner.drvPath p.drvPath ]"))
+        return package + [nix("eval", "--raw", f'.#checks.{system}."@demo/api".drvPath')]
 
     original = api_drv()
     write("apps/worker/start.js", "// sibling edit")
     write("docs/index.md", "irrelevant")
+    write("notes.txt", "an unrelated top-level edit")
     run("git", "add", ".", cwd=root)
     assert api_drv() == original
     write("libs/shared/index.js", "module.exports = 43")
     assert all(a != b for a, b in zip(original, api_drv()))
     flake("mkMonorepoFlake", 'commands = { server = "./apps/api"; }; script = "report"; cacheDependencies = true;')
     assert nix("run", ".#server") == "43"
+    write("flake.nix", """
+      {
+        inputs.drvjs.url = "github:drvlang/drvjs";
+        outputs = { drvjs, ... }: drvjs.lib.mkMonorepoFlake {
+          commands.server = "apps/api";
+          srcForTarget = { name, target }: assert name == "server" && target == "apps/api";
+            drvjs.lib.projectSource { root = ./.; files = [
+              ./package.json ./pnpm-lock.yaml ./pnpm-workspace.yaml (./. + ("/" + target)) ./libs/shared
+            ]; };
+          script = "report";
+        };
+      }
+    """)
+    assert nix("run", ".#server") == "43"
+    write("apps/api/test.js", "process.exit(7)")
+    assert cli("test", "@demo/api", check=False).returncode == 7
+    failed = run("nix", "build", "--no-write-lock-file", "--override-input", "drvjs", repo,
+                 "--option", "allow-import-from-derivation", "false", "--no-link",
+                 f".#checks.{system}.server", cwd=root, check=False)
+    assert failed.returncode != 0
 print("PASS: direct builds, scripts, downstream flakes, workspace closure and source invalidation")

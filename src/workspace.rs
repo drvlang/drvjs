@@ -80,6 +80,11 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
             "noncanonical workspace importer: {path}"
         );
         let file = project.join(path).join("package.json");
+        // A target-specific flake source may omit unrelated workspaces. Check
+        // every required manifest once lock traversal establishes the closure.
+        if path != "." && !filters.is_empty() && !file.try_exists()? {
+            continue;
+        }
         ensure!(
             file.canonicalize()?.starts_with(&canonical_root),
             "workspace manifest escapes project root"
@@ -176,6 +181,12 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
             reached.insert(id.clone())
         }) {
             continue;
+        }
+        if is_importer {
+            ensure!(
+                manifests.contains_key(&id),
+                "required workspace manifest missing: {id}/package.json"
+            );
         }
         if is_importer && id != "." {
             for config in [".npmrc", ".pnpmfile.cjs"] {
@@ -472,6 +483,7 @@ pub fn write_project(
                     target.is_absolute()
                         && target.file_name().is_some_and(|name| {
                             name.as_encoded_bytes().ends_with(b"-drvjs-node-modules")
+                                || name.as_encoded_bytes().ends_with(b"-drvjs-installation")
                         })
                 });
                 if installed || path == default_link || Some(path) == out_link {

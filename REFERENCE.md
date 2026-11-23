@@ -2,7 +2,7 @@
 
 ## Standalone exports
 
-Run directly from GitHub with `nix run github:ryantm/drvjs -- --help`, or
+Run directly from GitHub with `nix run github:drvlang/drvjs -- --help`, or
 use the commands below from a checkout.
 
 ```sh
@@ -56,6 +56,8 @@ Exports include the Rust helper's source, Cargo.lock, the projected project,
 and pinned Nix expressions. They do not reference the original checkout. No
 IFD, dynamic derivations, or recursive Nix are required.
 
+For source-based flakes, `drvjs.lib.projectSource` takes a project root and an explicit list of input files and directories. Include the lockfile, manifests, workspace configuration, selected packages and any assets the scripts read. The source-based builder and CLI require dynamic and recursive derivations.
+
 ## Nix flake distribution
 
 Versioned releases are published to
@@ -66,7 +68,7 @@ To consume a release as an input:
 ```nix
 inputs.drvjs.url = "https://flakehub.com/f/ryantm/drvjs/0.1.0.tar.gz";
 # GitHub is also supported:
-# inputs.drvjs.url = "github:ryantm/drvjs/v0.1.0";
+# inputs.drvjs.url = "github:drvlang/drvjs/v0.1.0";
 ```
 
 Use `drvjs.packages.${system}.default` or `drvjs.packages.${system}.drvjs`.
@@ -230,7 +232,7 @@ workspace reproduced the existing `@vitejs/plugin-vue` link and shim
 differences against pnpm on both versions.
 
 ```sh
-python3 benchmarks/ci-workspace.py --baseline /path/to/old/drvjs --optimized drvjs \
+nix run .#bench -- ci-workspace --baseline /path/to/old/drvjs --optimized drvjs \
   --project /path/to/vue --edit-file packages/compiler-sfc/src/index.ts --runs 9 \
   --command node node_modules/vitest/vitest.mjs run --project unit --maxWorkers 4 \
     packages/compiler-sfc/__tests__/parse.spec.ts packages/compiler-sfc/__tests__/compileTemplate.spec.ts
@@ -372,7 +374,7 @@ reduces that to about a 5% end-to-end improvement. Initial cache preparation and
 downloads are excluded. The small subset regression is why caching is opt-in.
 These are local measurements, not a prediction for a particular CI runner.
 [Samples and methodology](benchmarks/incremental-2026-11-13.json) are recorded;
-`benchmarks/rebuild.py` reproduces the alternating rebuild comparison.
+`nix run .#bench -- rebuild` reproduces the alternating rebuild comparison.
 `tests/incremental.py` separately checks invalidation after dependency, patch,
 and source changes, reuse across selections, target pruning, and cache closures.
 
@@ -397,8 +399,8 @@ This option supports both retained stores and external-store verification.
 Normalization adds a one-time preparation step and can change the cache size.
 Whether it improves repeated reconstruction depends on the packages, CPU and
 filesystem. Measure cache preparation separately from assembly. The
-[cache preparation prototype](benchmarks/prepare-zstd.py) and
-[alternating experiment harness](benchmarks/experiment.py) support comparisons
+[cache preparation prototype](benchmarks/README.md) and
+[alternating experiment harness](benchmarks/README.md) support comparisons
 using your own exported project and already-fetched inputs.
 
 ## How it works
@@ -603,7 +605,7 @@ after warm-up. It compares workspace metadata and the bytes of each projected
 lockfile and fetch plan. Export timings end when the CLI finishes writing the
 export. On pnpm v12.21.0's own v13 lockfile, listing all 237 projects took
 39.5 → 5.5 ms and peak memory fell from 23.7 to 7.2 MiB (nine-run medians).
-[Benchmark script](benchmarks/lockfiles.py) · [Inputs and samples](benchmarks/lockfiles-2026-11-22.json)
+[Benchmark script](benchmarks/README.md) · [Inputs and samples](benchmarks/lockfiles-2026-11-22.json)
 
 ## Materialization performance
 
@@ -623,7 +625,7 @@ those host tools for exporting, fetching, and independent verification. Its
 wrapper is a separate derivation, so evaluating or building the assembler does
 not require building Node or pnpm.
 
-`benchmarks/materialize.py` runs alternating before/after comparisons with
+`nix run .#bench -- materialize` runs alternating before/after comparisons with
 existing project and tarball-manifest inputs. Downloads, export and Nix
 realization overhead should be measured separately. When comparing against an
 older native assembler, pass `--baseline-arg=--native`.
@@ -666,10 +668,10 @@ as described above when rebuilding on fresh CI workers.
 To compare exported selections with your own graph and cache:
 
 ```sh
-python3 benchmarks/cache-updates.py \
+nix run .#bench -- cache-updates \
   --case direct=/tmp/direct-export --case shared=/tmp/shared-export \
   --runs 7 --out /tmp/transfer-results
-python3 benchmarks/rebuild.py \
+nix run .#bench -- rebuild \
   --case direct=/tmp/direct-export --case shared=/tmp/shared-export \
   --fresh --runs 3 --out /tmp/first-build-results
 ```
@@ -747,13 +749,13 @@ downloads. Cache policy is unchanged automatically. For a new file cache:
 
 ```sh
 nix copy --to 'file:///tmp/drvjs-cache?compression=zstd&compression-level=9' ./result
-python3 benchmarks/cache-compression.py ./result --out compression.json
+nix run .#bench -- cache-compression ./result --out compression.json
 ```
 
-`benchmarks/rebuild.py --case baseline=EXPORT --case direct=EXPORT --case layer=EXPORT`
+`nix run .#bench -- rebuild --case baseline=EXPORT --case direct=EXPORT --case layer=EXPORT`
 compares multiple exports; add `--fresh` to include initial layer preparation with
 tools and downloads already cached, or `--source-edits` to measure ordinary source
-updates in copied exports. `benchmarks/materialize.py --dependency-layer PATH`
+updates in copied exports. `nix run .#bench -- materialize --dependency-layer PATH`
 compares direct assembly with attachment outside Nix. The JSON report records
 samples, commands, sizes, and validation scope.
 
@@ -839,17 +841,17 @@ the compiled-file and OS caches remain warm. Assembly measurements use five
 alternating runs with identical realized inputs, fresh output directories, and
 four native workers. They exclude Nix evaluation, registration, downloads, and
 cleanup. The raw report includes every timing and command.
-The Nix rebuild measurement uses `benchmarks/rebuild.py`, which realizes tools
+The Nix rebuild measurement uses `nix run .#bench -- rebuild`, which realizes tools
 and archives first, then times alternating `nix-build --check` runs with four
 cores, including evaluation, assembly, NAR checking, and daemon overhead.
 
 ```sh
 python3 tests/ci.py --iets /path/to/iets
-python3 benchmarks/evaluate.py --before /tmp/vue-before --after /tmp/vue-after \
+nix run .#bench -- evaluate --before /tmp/vue-before --after /tmp/vue-after \
   --iets /path/to/iets --runs 5 --out evaluation.json
 nix-build /tmp/vue-after --no-out-link
-python3 benchmarks/closure.py /tmp/vue-after --out closure.json
-python3 benchmarks/rebuild.py --before /tmp/vue-before --after /tmp/vue-after \
+nix run .#bench -- closure /tmp/vue-after --out closure.json
+nix run .#bench -- rebuild --before /tmp/vue-before --after /tmp/vue-after \
   --runs 5 --out rebuild-results
 ```
 
@@ -904,7 +906,7 @@ nix-build ./export --arg unpackedStore null --arg keepVerificationStore true -o 
 # A later build can use fresh/.pnpm-store as its unpackedStore.
 ```
 
-`benchmarks/unpacked-store.py` compares this path with cached tarballs using
+`nix run .#bench -- unpacked-store` compares this path with cached tarballs using
 fresh outputs and alternating trials. `tests/unpacked.sh` covers independent
 pnpm verification, patches/hooks, Nix reproducibility, optional retention, and
 incomplete-cache rejection. This mode remains opt-in.

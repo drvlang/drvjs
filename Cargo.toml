@@ -3,7 +3,7 @@ name = "drvjs"
 version = "0.1.0"
 edition = "2024"
 license = "CC0-1.0"
-repository = "https://github.com/ryantm/drvjs"
+repository = "https://github.com/drvlang/drvjs"
 description = "Package-granular Nix fetching for pnpm projects"
 
 [profile.release]

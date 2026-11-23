@@ -1,4 +1,4 @@
-{ pkgs }:
+{ pkgs, dynamicFile ? null }:
 let
   version = "0.1.0";
   # This derivation is sufficient for production assembly. Keeping it separate
@@ -13,7 +13,7 @@ let
     };
     cargoLock = {
       lockFile = ../Cargo.lock;
-      outputHashes."pnpm-lockfile-0.0.1" = "sha256-fbRLUhp1t8bTaOms7nnWMTG5Y6/l1vN/GuCrbYYX7NA=";
+      allowBuiltinFetchGit = true;
     };
     nativeCheckInputs = [ pkgs.gitMinimal ];
     meta = {
@@ -23,11 +23,21 @@ let
       mainProgram = "drvjs";
     };
   };
+  entry = pkgs.writeText "drvjs-project.nix" ''
+    { directory, options }:
+    let pkgs = import ${pkgs.path} { system = "${pkgs.stdenv.hostPlatform.system}"; };
+        project = import ${./.}/project.nix {
+          inherit pkgs;
+          drvjs.unwrapped = { outPath = builtins.storePath "${unwrapped}"; system = "${pkgs.stdenv.hostPlatform.system}"; };
+          dynamic = import ${dynamicFile} { inherit pkgs; };
+        };
+    in project.mkJsPackage ((builtins.fromJSON options) // { src = /. + directory; })
+  '';
 in pkgs.runCommand "drvjs-${version}" {
   nativeBuildInputs = [ pkgs.makeWrapper ];
   passthru = { inherit unwrapped; };
   inherit (unwrapped) meta;
 } ''
   mkdir -p "$out/bin"
-  makeWrapper ${unwrapped}/bin/drvjs "$out/bin/drvjs" --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.pnpm_10 pkgs.nodejs pkgs.curl pkgs.nix pkgs.gitMinimal ]}
+  makeWrapper ${unwrapped}/bin/drvjs "$out/bin/drvjs" ${pkgs.lib.optionalString (dynamicFile != null) "--set DRVJS_ENTRY ${entry}"} --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.pnpm_10 pkgs.nodejs pkgs.curl pkgs.nix pkgs.gitMinimal ]}
 ''

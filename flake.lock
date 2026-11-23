@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "drvkit": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1795406706,
+        "narHash": "sha256-nWGa94qAxWVUAc3vvRuwrsOOXYJTjMWHeodYVPk/l8U=",
+        "owner": "drvlang",
+        "repo": "drvkit",
+        "rev": "46216d6b40c3b1e249c9f8358d45c90e4c4bf913",
+        "type": "github"
+      },
+      "original": {
+        "owner": "drvlang",
+        "repo": "drvkit",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1786593342,
@@ -18,6 +34,7 @@
     },
     "root": {
       "inputs": {
+        "drvkit": "drvkit",
         "nixpkgs": "nixpkgs"
       }
     }

@@ -37,8 +37,11 @@ enum Commands {
         #[command(flatten)]
         project: Project,
         /// Nix output symlink (relative to the project).
-        #[arg(short, long, default_value = "result")]
-        out: PathBuf,
+        #[arg(short, long, alias = "out-link", conflicts_with = "no_link")]
+        out: Option<PathBuf>,
+        /// Print the store path without creating an output symlink.
+        #[arg(long)]
+        no_link: bool,
     },
     /// Run the start script in a writable copy of the built project.
     Run {
@@ -59,6 +62,8 @@ enum Commands {
         /// Include application sources for a single-package project.
         #[arg(long)]
         include_sources: bool,
+        #[arg(long, hide = true)]
+        plan_only: bool,
     },
     #[command(hide = true)]
     WorkspaceInfo {
@@ -177,10 +182,25 @@ fn export(
     out: &Path,
     include_sources: bool,
     out_link: Option<&Path>,
+    standalone: bool,
 ) -> Result<Exported> {
     let project = args.directory.canonicalize()?;
     let lock = workspace::read_lock(&project)?;
-    let filters = args.selectors();
+    let mut filters = args.selectors();
+    let aliases = project.join("drvlang.json");
+    if aliases.is_file() {
+        #[derive(serde::Deserialize)]
+        struct Config {
+            #[serde(default)]
+            commands: std::collections::BTreeMap<String, String>,
+        }
+        let config: Config = serde_json::from_slice(&fs::read(aliases)?)?;
+        for selector in &mut filters {
+            if let Some(path) = config.commands.get(selector) {
+                selector.clone_from(path);
+            }
+        }
+    }
     let mut selection = workspace::select(&project, &lock, &filters)?;
     let registry_urls = config::project_registries(
         &mut selection.lock,
@@ -231,33 +251,35 @@ fn export(
         stage.path().join("default.nix"),
         include_str!("../nix/build.nix"),
     )?;
-    fs::create_dir_all(stage.path().join("drvjs-src/src"))?;
-    fs::create_dir_all(stage.path().join("drvjs-src/nix"))?;
-    for (name, content) in [
-        ("Cargo.toml", include_str!("../Cargo.toml")),
-        ("Cargo.lock", include_str!("../Cargo.lock")),
-        ("src/main.rs", include_str!("main.rs")),
-        ("src/commands.rs", include_str!("commands.rs")),
-        ("src/config.rs", include_str!("config.rs")),
-        (
-            "src/dependency_layer.rs",
-            include_str!("dependency_layer.rs"),
-        ),
-        ("src/fetch.rs", include_str!("fetch.rs")),
-        ("src/lockfile.rs", include_str!("lockfile.rs")),
-        ("src/plan.rs", include_str!("plan.rs")),
-        ("src/pnpm.rs", include_str!("pnpm.rs")),
-        ("src/shared_store.rs", include_str!("shared_store.rs")),
-        ("src/native.rs", include_str!("native.rs")),
-        ("src/native_store.rs", include_str!("native_store.rs")),
-        ("src/package_cache.rs", include_str!("package_cache.rs")),
-        ("src/native_shim.txt", include_str!("native_shim.txt")),
-        ("src/verify.rs", include_str!("verify.rs")),
-        ("src/workspace.rs", include_str!("workspace.rs")),
-        ("nix/build.nix", include_str!("../nix/build.nix")),
-        ("nix/package.nix", include_str!("../nix/package.nix")),
-    ] {
-        fs::write(stage.path().join("drvjs-src").join(name), content)?;
+    if standalone {
+        fs::create_dir_all(stage.path().join("drvjs-src/src"))?;
+        fs::create_dir_all(stage.path().join("drvjs-src/nix"))?;
+        for (name, content) in [
+            ("Cargo.toml", include_str!("../Cargo.toml")),
+            ("Cargo.lock", include_str!("../Cargo.lock")),
+            ("src/main.rs", include_str!("main.rs")),
+            ("src/commands.rs", include_str!("commands.rs")),
+            ("src/config.rs", include_str!("config.rs")),
+            (
+                "src/dependency_layer.rs",
+                include_str!("dependency_layer.rs"),
+            ),
+            ("src/fetch.rs", include_str!("fetch.rs")),
+            ("src/lockfile.rs", include_str!("lockfile.rs")),
+            ("src/plan.rs", include_str!("plan.rs")),
+            ("src/pnpm.rs", include_str!("pnpm.rs")),
+            ("src/shared_store.rs", include_str!("shared_store.rs")),
+            ("src/native.rs", include_str!("native.rs")),
+            ("src/native_store.rs", include_str!("native_store.rs")),
+            ("src/package_cache.rs", include_str!("package_cache.rs")),
+            ("src/native_shim.txt", include_str!("native_shim.txt")),
+            ("src/verify.rs", include_str!("verify.rs")),
+            ("src/workspace.rs", include_str!("workspace.rs")),
+            ("nix/build.nix", include_str!("../nix/build.nix")),
+            ("nix/package.nix", include_str!("../nix/package.nix")),
+        ] {
+            fs::write(stage.path().join("drvjs-src").join(name), content)?;
+        }
     }
     fs::rename(stage.path(), out)?;
     Ok(Exported {
@@ -269,16 +291,28 @@ fn export(
 
 fn main() {
     let result = match Cli::parse().command {
-        Commands::Build { project, out } => commands::build(&project, &out),
+        Commands::Build {
+            project,
+            out,
+            no_link,
+        } => commands::build(
+            &project,
+            if no_link {
+                None
+            } else {
+                Some(out.as_deref().unwrap_or(Path::new("result")))
+            },
+        ),
         Commands::Run { execution, script } => execution.run(&script),
         Commands::Test(execution) => execution.run("test"),
         Commands::Export {
             project,
             out,
             include_sources,
+            plan_only,
         } => {
             let out = out.unwrap_or_else(|| project.directory.join(".drvjs"));
-            export(&project, &out, include_sources, None).map(|graph| {
+            export(&project, &out, include_sources, None, !plan_only).map(|graph| {
                 println!(
                     "Exported {} workspace importers and {} locked packages to {}",
                     graph.importers,

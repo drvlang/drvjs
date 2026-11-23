@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix="drvjs-lockfiles-") as tmp:
     assert run("drvjs", "test", "-C", root, "consumer").splitlines()[-1] == "17.0.2"
 
     (root / "flake.nix").write_text('''{
-      inputs.drvjs.url = "github:ryantm/drvjs";
+      inputs.drvjs.url = "github:drvlang/drvjs";
       outputs = { drvjs, ... }: drvjs.lib.mkMonorepoFlake { src = ./.; };
     }''')
     selected = Path(run("nix", "build", ".#consumer", "--no-write-lock-file", "--no-link",

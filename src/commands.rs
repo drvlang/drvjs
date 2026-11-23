@@ -68,36 +68,64 @@ fn run(command: &mut Command, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn realize(project: &Project, graph: &Path, link: &Path, dependencies_only: bool) -> Result<()> {
+// Export on the host strips npm credentials and completes private tarball
+// integrity before any source enters the Nix store. The recursive planner
+// independently resolves the sanitized lockfile and instantiates the build.
+fn realize(project: &Project, graph: &Path, link: Option<&Path>, quiet: bool) -> Result<()> {
     if let Some(npmrc) = &project.npmrc {
         crate::fetch::fetch(graph, Some(npmrc), false, None, false)?;
     }
-    let mut command = Command::new("nix-build");
-    command.arg(graph).arg("--out-link").arg(link);
-    if dependencies_only {
-        command.args(["-A", "dependencies"]).stdout(Stdio::null());
+    let mut command = Command::new("nix");
+    command.args(["build", "--impure", "--print-out-paths"]);
+    if let Some(entry) = std::env::var_os("DRVJS_ENTRY") {
+        command.arg("--file").arg(entry);
+    } else {
+        let local = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let flake = if local.join("flake.nix").is_file() {
+            format!("git+file://{}", local.display())
+        } else {
+            "github:drvlang/drvjs".into()
+        };
+        command.args(["--expr", "{ flake, directory, options }: (builtins.getFlake flake).lib.mkJsPackage ((builtins.fromJSON options) // { system = builtins.currentSystem; src = /. + directory; })", "--argstr", "flake"]).arg(flake);
     }
-    run(&mut command, "nix-build")
+    let mut options = serde_json::to_value(&project.options)?;
+    options["dependenciesOnly"] = quiet.into();
+    command
+        .args(["--argstr", "directory"])
+        .arg(graph.join("project"))
+        .args(["--argstr", "options"])
+        .arg(serde_json::to_string(&options)?)
+        .args(["--option", "allow-import-from-derivation", "false"]);
+    if let Some(link) = link {
+        command.arg("--out-link").arg(link);
+    } else {
+        command.arg("--no-link");
+    }
+    if quiet {
+        command.stdout(Stdio::null());
+    }
+    run(&mut command, "nix build")
 }
 
-pub(crate) fn build(project: &Project, out: &Path) -> Result<()> {
+pub(crate) fn build(project: &Project, out: Option<&Path>) -> Result<()> {
     let temp = tempfile::tempdir()?;
     let graph = temp.path().join("export");
-    let link = project.directory.canonicalize()?.join(out);
-    export(project, &graph, true, Some(&link))?;
-    realize(project, &graph, &link, false)
+    let root = project.directory.canonicalize()?;
+    let link = out.map(|o| root.join(o));
+    export(project, &graph, true, link.as_deref(), false)?;
+    realize(project, &graph, link.as_deref(), false)
 }
 
 impl Execution {
     pub fn run(&self, script: &str) -> Result<()> {
         let temp = tempfile::tempdir()?;
         let graph = temp.path().join("export");
-        let layer = temp.path().join("dependencies");
-        let exported = export(&self.project, &graph, true, None)?;
-        realize(&self.project, &graph, &layer, true)?;
+        let installation = temp.path().join("installation");
+        let exported = export(&self.project, &graph, true, None, false)?;
+        realize(&self.project, &graph, Some(&installation), true)?;
         run_script(
             &graph.join("project"),
-            &layer,
+            &installation,
             Path::new(&exported.primary),
             script,
             &self.args,
