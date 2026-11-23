@@ -131,13 +131,18 @@ pub fn rebuild(a: Rebuild) -> Result<()> {
     fresh_dir(&a.out)?;
     let root = a.out.canonicalize()?;
     let mut outputs = BTreeMap::new();
+    let mut floating = BTreeMap::new();
     for (name, p) in &mut cases {
         if a.source_edits {
             let dest = root.join("exports").join(&*name);
             copy_tree(p, &dest, true)?;
             *p = dest;
         }
-        outputs.insert(name.clone(), run(&build_args(p))?);
+        let output = run(&build_args(p))?;
+        let info: Value =
+            serde_json::from_str(&run(&argv!["nix", "path-info", "--json", &output])?)?;
+        floating.insert(name.clone(), info[&output]["ca"].is_string());
+        outputs.insert(name.clone(), output);
     }
     let nonce = nonce()?;
     let mut rows = vec![];
@@ -154,7 +159,7 @@ pub fn rebuild(a: Rebuild) -> Result<()> {
                 fs::write(p.join("project").join(marker), &content)?;
             }
             let mut cmd = build_args(&p);
-            if a.fresh || !a.source_edits {
+            if a.fresh || (!a.source_edits && floating[&mode]) {
                 cmd = argv![
                     "nix-build",
                     "--expr",
@@ -174,6 +179,9 @@ pub fn rebuild(a: Rebuild) -> Result<()> {
                     "--cores",
                     "4"
                 ];
+            } else if !a.source_edits {
+                // Historical input-addressed exports support the classic check.
+                cmd.push("--check".into());
             }
             let log = log_file(&root, &format!("{mode}-{trial}.log"))?;
             let (result, seconds) = measured(|| logged(&cmd, &log))?;
