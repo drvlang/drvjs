@@ -10,7 +10,9 @@ use walkdir::WalkDir;
 
 pub struct Selection {
     pub lock: Value,
+    pub preserve_lock_bytes: bool,
     pub config: Option<Value>,
+    pub npmrc: BTreeMap<String, String>,
     pub manifests: BTreeMap<String, Value>,
     pub importers: BTreeSet<String>,
     pub all_importers: BTreeSet<String>,
@@ -63,11 +65,12 @@ pub fn read_lock(project: &Path) -> Result<String> {
 }
 
 pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selection> {
-    let mut lock: Value = serde_yaml_ng::from_str(input)?;
+    let parsed = crate::lockfile::parse(input)?;
+    let mut lock = parsed.graph;
+    let mut preserve_lock_bytes = parsed.original_bytes;
     let importers = lock["importers"]
         .as_object()
-        .context("lockfile has no importers")?
-        .clone();
+        .context("lockfile has no importers")?;
     ensure!(!importers.is_empty(), "lockfile has no importers");
     let mut manifests = BTreeMap::new();
     let canonical_root = project.canonicalize()?;
@@ -81,7 +84,7 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
             file.canonicalize()?.starts_with(&canonical_root),
             "workspace manifest escapes project root"
         );
-        let manifest: Value = serde_json::from_slice(
+        let mut manifest: Value = serde_json::from_slice(
             &fs::read(file).with_context(|| format!("reading {path}/package.json"))?,
         )?;
         if let Some(settings) = manifest.get("pnpm") {
@@ -89,8 +92,15 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
                 path == ".",
                 "pnpm settings in nested manifests are unsupported: {path}"
             );
+            ensure!(
+                settings.get("registries").is_none()
+                    && settings.get("namedRegistries").is_none()
+                    && settings.get("lockfile").is_none(),
+                "set registries and lockfile options in pnpm-workspace.yaml"
+            );
             crate::config::validate_settings(settings)?;
         }
+        manifest.sort_all_objects();
         manifests.insert(path.clone(), manifest);
     }
     let config_file = project.join("pnpm-workspace.yaml");
@@ -103,9 +113,11 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
         config.is_some() || (importers.len() == 1 && importers.contains_key(".")),
         "multiple importers require pnpm-workspace.yaml"
     );
-    if let Some(config) = &config {
+    if let Some(config) = &mut config {
+        config.sort_all_objects();
         crate::config::validate_settings(config)?;
     }
+    let npmrc = crate::config::npmrc(project)?;
     let root_manifest = manifests.get(".").cloned().unwrap_or(json!({}));
     for importer in importers.values() {
         for key in ["packageManagerDependencies", "configDependencies"] {
@@ -114,7 +126,7 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
                     .get(key)
                     .and_then(Value::as_object)
                     .is_none_or(|v| v.is_empty()),
-                "pnpm split lockfiles with {key} are not yet supported"
+                "{key} in the project dependency graph is unsupported"
             );
         }
     }
@@ -153,7 +165,8 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
             queue.push_back((true, matches[0].clone()));
         }
     }
-    let snapshots = lock["snapshots"].as_object().cloned().unwrap_or_default();
+    let empty = serde_json::Map::new();
+    let snapshots = lock["snapshots"].as_object().unwrap_or(&empty);
     let mut selected = BTreeSet::new();
     let mut reached = BTreeSet::new();
     while let Some((is_importer, id)) = queue.pop_front() {
@@ -208,10 +221,32 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
             }
         }
     }
+    // Newer lockfiles keep patch hashes in the graph and paths in project settings.
+    if let Some(patches) = lock
+        .get_mut("patchedDependencies")
+        .and_then(Value::as_object_mut)
+    {
+        // workspace-info emits patch paths in declaration-key order.
+        patches.sort_keys();
+        for (id, patch) in patches {
+            if let Some(hash) = patch.as_str() {
+                let path = config
+                    .as_ref()
+                    .and_then(|cfg| cfg["patchedDependencies"].get(id))
+                    .or_else(|| root_manifest["pnpm"]["patchedDependencies"].get(id))
+                    .and_then(Value::as_str)
+                    .with_context(|| format!("missing configured patch path for {id}"))?;
+                *patch = json!({"hash": hash, "path": path});
+                preserve_lock_bytes = false;
+            }
+        }
+    }
     // Full single-package exports preserve the original lock bytes for backwards compatibility.
     if config.is_none() && filters.is_empty() {
         return Ok(Selection {
             lock,
+            preserve_lock_bytes,
+            npmrc,
             config,
             manifests,
             importers: selected,
@@ -229,28 +264,17 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
             "missing package resolution: {id}"
         );
     }
-    let mut retained = serde_json::Map::new();
-    for path in &selected {
-        retained.insert(path.clone(), importers[path].clone());
-    }
+    let retained = lock["importers"].as_object_mut().unwrap();
+    retained.retain(|path, _| selected.contains(path));
     // pnpm always includes the root. Keep it empty unless explicitly selected.
     retained.entry(".".to_owned()).or_insert(json!({}));
-    lock["importers"] = Value::Object(retained);
-    lock["packages"] = Value::Object(
-        lock["packages"]
-            .as_object()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|(id, _)| package_ids.contains(id))
-            .collect(),
-    );
-    lock["snapshots"] = Value::Object(
-        snapshots
-            .into_iter()
-            .filter(|(id, _)| reached.contains(id))
-            .collect(),
-    );
+    for (section, ids) in [("packages", &package_ids), ("snapshots", &reached)] {
+        if let Some(entries) = lock[section].as_object_mut() {
+            entries.retain(|id, _| ids.contains(id));
+        } else {
+            lock[section] = json!({});
+        }
+    }
     manifests.retain(|path, _| selected.contains(path));
     manifests
         .entry(".".into())
@@ -293,6 +317,8 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
         }
     }
     if let Some(config) = &mut config {
+        // The exported project uses the projected v9 lockfile.
+        config.as_object_mut().unwrap().remove("lockfile");
         config["packages"] = json!(
             selected
                 .iter()
@@ -329,7 +355,7 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
                 }
             }
         }
-        if let Some(catalogs) = lock["catalogs"].as_object_mut() {
+        if let Some(catalogs) = lock.get_mut("catalogs").and_then(Value::as_object_mut) {
             catalogs.retain(|catalog, entries| {
                 if let Some(names) = used.get(catalog) {
                     if let Some(entries) = entries.as_object_mut() {
@@ -365,6 +391,8 @@ pub fn select(project: &Path, input: &str, filters: &[String]) -> Result<Selecti
     }
     Ok(Selection {
         lock,
+        preserve_lock_bytes: false,
+        npmrc,
         config,
         manifests,
         importers: selected,
@@ -498,8 +526,8 @@ pub fn write_project(
             serde_json::to_vec_pretty(manifest)?,
         )?;
     }
-    let npmrc = crate::config::npmrc(project)?;
-    if project.join(".npmrc").exists() {
+    let npmrc = &selection.npmrc;
+    if !npmrc.is_empty() || project.join(".npmrc").exists() {
         fs::write(
             output.join(".npmrc"),
             npmrc
@@ -556,12 +584,15 @@ pub fn copy_support(project: &Path, output: &Path, lock: &Value) -> Result<()> {
 }
 
 pub fn importer_paths(project: &Path) -> Result<Vec<PathBuf>> {
-    let lock: Value = serde_yaml_ng::from_slice(&fs::read(project.join("pnpm-lock.yaml"))?)?;
-    importer_paths_from_lock(&lock)
+    crate::lockfile::importer_paths(&read_lock(project)?)
 }
 
 pub fn importer_paths_from_lock(lock: &Value) -> Result<Vec<PathBuf>> {
-    lock["importers"]
+    paths_from_importers(&lock["importers"])
+}
+
+pub fn paths_from_importers(importers: &Value) -> Result<Vec<PathBuf>> {
+    let mut paths = importers
         .as_object()
         .context("missing importers")?
         .keys()
@@ -569,7 +600,9 @@ pub fn importer_paths_from_lock(lock: &Value) -> Result<Vec<PathBuf>> {
             ensure!(normalized(".", path)? == *path, "invalid importer path");
             Ok(PathBuf::from(path))
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    paths.sort_unstable_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+    Ok(paths)
 }
 
 #[cfg(test)]

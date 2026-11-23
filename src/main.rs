@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod dependency_layer;
 mod fetch;
+mod lockfile;
 mod native;
 mod native_store;
 mod package_cache;
@@ -181,15 +182,20 @@ fn export(
     let lock = workspace::read_lock(&project)?;
     let filters = args.selectors();
     let mut selection = workspace::select(&project, &lock, &filters)?;
+    let registry_urls = config::project_registries(
+        &mut selection.lock,
+        selection.config.as_mut(),
+        &mut selection.npmrc,
+    )?;
     let updated = fetch::complete_integrities(&mut selection.lock, args.npmrc.as_deref())?;
     // An unfiltered, single-package export preserves even comments and formatting.
-    let lock_yaml = if !updated && filters.is_empty() && selection.config.is_none() {
+    let lock_yaml = if !updated && !registry_urls && selection.preserve_lock_bytes {
         lock
     } else {
+        selection.lock.sort_all_objects();
         serde_yaml_ng::to_string(&selection.lock)?
     };
-    let settings = config::npmrc(&project)?;
-    let mut plan = plan::parse_with_registry(&lock_yaml, &settings)?;
+    let mut plan = plan::from_lock(&selection.lock, &selection.npmrc)?;
     ensure!(
         !out.exists(),
         "export destination already exists: {}",
@@ -238,6 +244,7 @@ fn export(
             include_str!("dependency_layer.rs"),
         ),
         ("src/fetch.rs", include_str!("fetch.rs")),
+        ("src/lockfile.rs", include_str!("lockfile.rs")),
         ("src/plan.rs", include_str!("plan.rs")),
         ("src/pnpm.rs", include_str!("pnpm.rs")),
         ("src/shared_store.rs", include_str!("shared_store.rs")),

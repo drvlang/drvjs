@@ -10,6 +10,7 @@ import http.server
 import io
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tarfile
@@ -113,7 +114,7 @@ with tempfile.TemporaryDirectory(prefix='drvjs-ci-') as scratch:
             # and its Node/pnpm dependencies either.
             helper_drv = eval_nix(f'(builtins.head ({expr}).nativeBuildInputs).drvPath')
             build_closure = run('nix-store', '-qR', helper_drv).splitlines()
-            assert not any('-nodejs-' in path or '-pnpm-' in path for path in build_closure)
+            assert not any('-nodejs-' in path or re.search(r'-pnpm-\d+\.\d+\.', path) for path in build_closure)
             run('node', '-e', "require('node:assert/strict').equal(require('ci-fixture'), 42)", cwd=output)
             assert not (Path(output) / '.pnpm-store').exists()
             run('nix-build', str(export), '--no-out-link', '--check')

@@ -4,7 +4,7 @@ drvjs builds a pnpm project's `node_modules` with Nix. Each locked npm tarball h
 
 ## Try it
 
-From a project with `package.json` and a `pnpm-lock.yaml` with `lockfileVersion: '9.0'`, use Nix with flakes on Linux (x86-64 or arm64). The CLI supplies Node and pnpm.
+From a project with `package.json` and `pnpm-lock.yaml`, use Nix with flakes on Linux (x86-64 or arm64). drvjs reads lockfile formats **9.0**, **12.0** and experimental **13.0**, including files with a separate pnpm version pin. The CLI supplies Node and pnpm.
 
 ```sh
 nix shell github:ryantm/drvjs

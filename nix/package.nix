@@ -11,7 +11,10 @@ let
       root = ../.;
       fileset = pkgs.lib.fileset.unions [ ../Cargo.toml ../Cargo.lock ../src ./build.nix ./package.nix ];
     };
-    cargoLock.lockFile = ../Cargo.lock;
+    cargoLock = {
+      lockFile = ../Cargo.lock;
+      outputHashes."pnpm-lockfile-0.0.1" = "sha256-fbRLUhp1t8bTaOms7nnWMTG5Y6/l1vN/GuCrbYYX7NA=";
+    };
     nativeCheckInputs = [ pkgs.gitMinimal ];
     meta = {
       description = "Package-granular Nix fetching for pnpm";

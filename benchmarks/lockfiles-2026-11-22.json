@@ -1,0 +1,631 @@
+{
+  "date": "2026-11-22",
+  "system": "x86_64-linux",
+  "cpu": "Intel Core i7-1280P",
+  "executables": {
+    "baseline": "/nix/store/wix7v39qmxdx3qmwmz0pbg5dvshpmfba-drvjs-0.1.0-unwrapped/bin/drvjs",
+    "optimized": "/nix/store/59g7cpfb95snkqflqyf2dir5kip3dxjf-drvjs-0.1.0-unwrapped/bin/drvjs"
+  },
+  "baseline_description": "Local drvjs with 9.0, 12.0 and 13.0 support before the planning optimizations.",
+  "vue_workspace": {
+    "revision": "5a8aa0b2ba575e098cbb63b396e9bcb751eb3a0f",
+    "release": "vuejs/core v3.5.22",
+    "filter": "@vue/compiler-sfc",
+    "input_formats": {
+      "9": "Original Vue lockfile.",
+      "12": "Same graph as format 9.0, with lockfileVersion set to 12.0.",
+      "13": "Same Vue graph serialized with pnpm-lockfile at b8d388835f9a40ee1ac53fbc2d4b58c3ebfa5600, preceded by the boot document from tests/lockfiles/pnpm-12.yaml."
+    },
+    "input_sha256": {
+      "9": "9c36f7159bb92e7aaa0a9e37b627e31db1bada8bfadb7682ff98a5fe67793a16",
+      "12": "bd2f666efa989aead9aeaf40980110ca19461e2b89bacc40d26104f10786ec91",
+      "13": "a87bc0bc3d4f70709315d599ab5a27e997817ef7c29b3c704f0e92719db64d61"
+    },
+    "input_bytes": {
+      "9": 216039,
+      "12": 216040,
+      "13": 201531
+    },
+    "runs_per_binary": 15,
+    "method": "benchmarks/lockfiles.py. One warm-up followed by alternating release CLI runs. Wall time includes process startup and output writing. Export runs use fresh temporary destinations. Projected lockfile and plan bytes, and workspace metadata, were compared against the baseline for each format.",
+    "results": [
+      {
+        "project": "9",
+        "operation": "list",
+        "samples_ms": {
+          "baseline": [
+            7.324,
+            9.293,
+            9.483,
+            8.571,
+            11.109,
+            8.115,
+            7.412,
+            10.492,
+            8.121,
+            7.172,
+            7.284,
+            6.901,
+            7.753,
+            9.438,
+            7.502
+          ],
+          "optimized": [
+            6.621,
+            5.993,
+            6.047,
+            8.035,
+            5.864,
+            5.973,
+            7.852,
+            6.161,
+            6.111,
+            5.328,
+            7.657,
+            7.059,
+            5.736,
+            6.032,
+            7.891
+          ]
+        },
+        "median_ms": {
+          "baseline": 8.115,
+          "optimized": 6.111
+        }
+      },
+      {
+        "project": "9",
+        "operation": "select",
+        "samples_ms": {
+          "baseline": [
+            11.143,
+            9.313,
+            11.775,
+            8.59,
+            12.334,
+            10.298,
+            10.995,
+            8.667,
+            11.976,
+            8.91,
+            11.155,
+            8.823,
+            8.866,
+            9.347,
+            9.374
+          ],
+          "optimized": [
+            7.473,
+            10.192,
+            8.499,
+            10.543,
+            8.199,
+            10.495,
+            8.293,
+            10.629,
+            8.068,
+            10.746,
+            8.037,
+            10.973,
+            8.003,
+            7.336,
+            8.698
+          ]
+        },
+        "median_ms": {
+          "baseline": 9.374,
+          "optimized": 8.499
+        }
+      },
+      {
+        "project": "9",
+        "operation": "filtered_export",
+        "samples_ms": {
+          "baseline": [
+            15.473,
+            16.215,
+            15.514,
+            13.991,
+            15.11,
+            13.608,
+            15.879,
+            14.899,
+            14.837,
+            16.138,
+            15.116,
+            16.058,
+            14.54,
+            14.786,
+            15.022
+          ],
+          "optimized": [
+            13.02,
+            12.234,
+            11.748,
+            12.189,
+            12.372,
+            11.905,
+            11.646,
+            13.867,
+            12.283,
+            12.666,
+            12.519,
+            15.436,
+            12.755,
+            12.387,
+            14.086
+          ]
+        },
+        "median_ms": {
+          "baseline": 15.11,
+          "optimized": 12.387
+        }
+      },
+      {
+        "project": "9",
+        "operation": "full_export",
+        "samples_ms": {
+          "baseline": [
+            29.619,
+            32.619,
+            30.083,
+            30.203,
+            30.017,
+            29.94,
+            30.329,
+            29.023,
+            30.043,
+            29.748,
+            34.409,
+            33.905,
+            30.736,
+            33.634,
+            31.069
+          ],
+          "optimized": [
+            26.741,
+            24.074,
+            25.167,
+            25.117,
+            23.515,
+            29.605,
+            23.767,
+            25.848,
+            24.334,
+            24.125,
+            23.707,
+            24.553,
+            25.032,
+            23.416,
+            26.174
+          ]
+        },
+        "median_ms": {
+          "baseline": 30.203,
+          "optimized": 24.553
+        }
+      },
+      {
+        "project": "12",
+        "operation": "list",
+        "samples_ms": {
+          "baseline": [
+            8.463,
+            8.137,
+            8.442,
+            6.856,
+            9.227,
+            9.428,
+            7.271,
+            7.74,
+            9.731,
+            9.656,
+            9.107,
+            8.75,
+            7.573,
+            9.474,
+            8.234
+          ],
+          "optimized": [
+            7.163,
+            6.142,
+            5.674,
+            5.333,
+            7.524,
+            5.649,
+            6.121,
+            5.72,
+            7.204,
+            7.623,
+            5.519,
+            7.895,
+            6.071,
+            6.728,
+            7.783
+          ]
+        },
+        "median_ms": {
+          "baseline": 8.463,
+          "optimized": 6.142
+        }
+      },
+      {
+        "project": "12",
+        "operation": "select",
+        "samples_ms": {
+          "baseline": [
+            11.273,
+            8.814,
+            12.587,
+            8.808,
+            9.843,
+            9.223,
+            12.696,
+            9.292,
+            8.328,
+            11.091,
+            8.847,
+            8.834,
+            10.182,
+            9.797,
+            10.615
+          ],
+          "optimized": [
+            7.91,
+            10.632,
+            8.354,
+            7.086,
+            7.808,
+            9.365,
+            9.111,
+            7.859,
+            9.505,
+            7.237,
+            7.667,
+            8.785,
+            9.074,
+            9.32,
+            9.163
+          ]
+        },
+        "median_ms": {
+          "baseline": 9.797,
+          "optimized": 8.785
+        }
+      },
+      {
+        "project": "12",
+        "operation": "filtered_export",
+        "samples_ms": {
+          "baseline": [
+            14.805,
+            14.386,
+            21.935,
+            14.513,
+            16.043,
+            13.857,
+            14.792,
+            15.576,
+            16.216,
+            14.847,
+            16.001,
+            17.425,
+            13.96,
+            15.086,
+            16.975
+          ],
+          "optimized": [
+            14.729,
+            11.997,
+            12.769,
+            13.807,
+            14.793,
+            13.229,
+            12.272,
+            13.772,
+            13.546,
+            12.768,
+            12.278,
+            12.885,
+            12.383,
+            14.821,
+            14.095
+          ]
+        },
+        "median_ms": {
+          "baseline": 15.086,
+          "optimized": 13.229
+        }
+      },
+      {
+        "project": "12",
+        "operation": "full_export",
+        "samples_ms": {
+          "baseline": [
+            31.937,
+            29.584,
+            30.279,
+            32.382,
+            30.875,
+            35.077,
+            29.984,
+            30.949,
+            30.472,
+            29.693,
+            30.445,
+            31.493,
+            31.474,
+            29.664,
+            30.116
+          ],
+          "optimized": [
+            23.685,
+            24.812,
+            25.551,
+            23.307,
+            25.695,
+            23.155,
+            28.547,
+            25.504,
+            27.89,
+            24.346,
+            23.137,
+            24.442,
+            23.682,
+            26.391,
+            25.267
+          ]
+        },
+        "median_ms": {
+          "baseline": 30.472,
+          "optimized": 24.812
+        }
+      },
+      {
+        "project": "13",
+        "operation": "list",
+        "samples_ms": {
+          "baseline": [
+            14.718,
+            14.481,
+            14.42,
+            14.142,
+            15.676,
+            15.814,
+            15.901,
+            14.585,
+            14.485,
+            13.884,
+            14.817,
+            16.451,
+            14.959,
+            16.57,
+            15.966
+          ],
+          "optimized": [
+            1.769,
+            2.251,
+            2.358,
+            2.491,
+            2.184,
+            2.353,
+            2.181,
+            2.01,
+            2.244,
+            2.306,
+            2.352,
+            2.412,
+            2.374,
+            2.09,
+            2.24
+          ]
+        },
+        "median_ms": {
+          "baseline": 14.817,
+          "optimized": 2.251
+        }
+      },
+      {
+        "project": "13",
+        "operation": "select",
+        "samples_ms": {
+          "baseline": [
+            16.813,
+            18.761,
+            16.872,
+            16.331,
+            15.512,
+            16.949,
+            17.085,
+            17.129,
+            15.813,
+            17.189,
+            18.037,
+            16.428,
+            16.454,
+            17.347,
+            16.807
+          ],
+          "optimized": [
+            12.274,
+            12.288,
+            12.651,
+            13.128,
+            11.768,
+            13.478,
+            12.244,
+            13.257,
+            13.232,
+            15.947,
+            12.86,
+            12.895,
+            11.829,
+            14.467,
+            13.535
+          ]
+        },
+        "median_ms": {
+          "baseline": 16.872,
+          "optimized": 12.895
+        }
+      },
+      {
+        "project": "13",
+        "operation": "filtered_export",
+        "samples_ms": {
+          "baseline": [
+            23.233,
+            23.132,
+            22.967,
+            26.768,
+            21.768,
+            23.96,
+            23.208,
+            22.172,
+            23.013,
+            23.204,
+            23.039,
+            22.436,
+            23.913,
+            24.907,
+            23.95
+          ],
+          "optimized": [
+            18.518,
+            16.503,
+            18.739,
+            20.797,
+            17.928,
+            17.548,
+            19.338,
+            20.367,
+            17.788,
+            19.131,
+            22.482,
+            19.496,
+            19.226,
+            16.785,
+            18.319
+          ]
+        },
+        "median_ms": {
+          "baseline": 23.204,
+          "optimized": 18.739
+        }
+      },
+      {
+        "project": "13",
+        "operation": "full_export",
+        "samples_ms": {
+          "baseline": [
+            42.372,
+            39.634,
+            40.897,
+            41.913,
+            39.602,
+            40.542,
+            41.033,
+            43.185,
+            41.935,
+            40.189,
+            43.974,
+            40.943,
+            40.888,
+            41.393,
+            41.918
+          ],
+          "optimized": [
+            32.012,
+            31.777,
+            32.598,
+            31.016,
+            31.567,
+            30.821,
+            34.41,
+            32.668,
+            33.873,
+            29.259,
+            30.612,
+            29.554,
+            31.014,
+            30.271,
+            31.514
+          ]
+        },
+        "median_ms": {
+          "baseline": 41.033,
+          "optimized": 31.514
+        }
+      }
+    ]
+  },
+  "pnpm_workspace_discovery": {
+    "release": "pnpm/pnpm v12.21.0",
+    "revision": "b8d388835f9a40ee1ac53fbc2d4b58c3ebfa5600",
+    "lockfile_version": "13.0",
+    "input_sha256": "1149f2083ac9030882b4aceea7b6f0cb4e07ee9496391149f7d09cecf1719f0a",
+    "input_bytes": 664861,
+    "method": "One warm-up and nine alternating workspace-info --list runs per binary, comparing every importer list. Wall time includes process startup and the GNU time wrapper. Peak resident set size (KiB) is from GNU time -f %M.",
+    "importers": 237,
+    "samples": {
+      "baseline": {
+        "ms": [
+          41.164,
+          38.396,
+          42.46,
+          43.688,
+          39.08,
+          39.541,
+          38.85,
+          40.254,
+          39.25
+        ],
+        "KiB": [
+          24160,
+          23528,
+          23184,
+          24484,
+          24204,
+          24432,
+          25280,
+          24520,
+          24280
+        ]
+      },
+      "optimized": {
+        "ms": [
+          5.625,
+          5.26,
+          4.69,
+          5.295,
+          5.241,
+          5.751,
+          6.579,
+          5.503,
+          6.503
+        ],
+        "KiB": [
+          7348,
+          7536,
+          7460,
+          7424,
+          7324,
+          7268,
+          7352,
+          7300,
+          7184
+        ]
+      }
+    },
+    "medians": {
+      "baseline": {
+        "ms": 39.541,
+        "KiB": 24280
+      },
+      "optimized": {
+        "ms": 5.503,
+        "KiB": 7348
+      }
+    }
+  }
+}

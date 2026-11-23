@@ -6,18 +6,6 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Lock {
-    lockfile_version: Value,
-    importers: BTreeMap<String, Value>,
-    #[serde(default)]
-    packages: BTreeMap<String, Value>,
-    #[serde(default)]
-    patched_dependencies: BTreeMap<String, Value>,
-    #[serde(default)]
-    snapshots: BTreeMap<String, Value>,
-}
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct Package {
     pub id: String,
@@ -43,26 +31,34 @@ pub struct Plan {
 
 #[cfg(test)]
 pub fn parse(input: &str) -> Result<Plan> {
-    parse_with_registry(input, &BTreeMap::new())
+    from_lock(&serde_yaml_ng::from_str(input)?, &BTreeMap::new())
 }
 
-pub fn parse_with_registry(input: &str, npmrc: &BTreeMap<String, String>) -> Result<Plan> {
-    let lock: Lock = serde_yaml_ng::from_str(input).context("invalid pnpm lockfile")?;
+pub fn from_lock(lock: &Value, npmrc: &BTreeMap<String, String>) -> Result<Plan> {
     ensure!(
-        lock.lockfile_version.as_str() == Some("9.0")
-            || lock.lockfile_version.as_f64() == Some(9.0),
-        "only pnpm lockfileVersion 9.0 is supported"
+        lock["lockfileVersion"].as_str() == Some("9.0")
+            || lock["lockfileVersion"].as_f64() == Some(9.0),
+        "expected a projected pnpm format 9.0 lockfile"
     );
+    let importers = lock["importers"].as_object().context("missing importers")?;
     ensure!(
-        lock.importers.contains_key("."),
+        importers.contains_key("."),
         "lockfile must include a root importer"
     );
+    let empty = serde_json::Map::new();
+    let section = |key: &str| -> Result<_> {
+        match lock.get(key) {
+            Some(value) => value.as_object().with_context(|| format!("invalid {key}")),
+            None => Ok(&empty),
+        }
+    };
+    let patched_dependencies = section("patchedDependencies")?;
     let identity = Regex::new(r"^((?:@[a-z0-9._-]+/)?[a-z0-9._-]+)@(.+)$")?;
     let safe_filename = Regex::new(r"[^a-zA-Z0-9._+-]")?;
     let mut packages = Vec::new();
-    for (id, package) in lock.packages {
+    for (id, package) in section("packages")? {
         let captures = identity
-            .captures(&id)
+            .captures(id)
             .with_context(|| format!("unsupported package identity: {id}"))?;
         let resolution = package["resolution"]
             .as_object()
@@ -115,12 +111,13 @@ pub fn parse_with_registry(input: &str, npmrc: &BTreeMap<String, String>) -> Res
             path: format!("/drvjs/{digest}"),
             name: format!("drvjs-{filename}"),
             private: address.host_str() != Some("registry.npmjs.org"),
-            id,
+            id: id.clone(),
             url: address.to_string(),
             hash: hash.to_owned(),
         });
     }
-    for importer in lock.importers.values() {
+    packages.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+    for importer in importers.values() {
         for section in ["dependencies", "devDependencies", "optionalDependencies"] {
             if let Some(deps) = importer[section].as_object() {
                 for (name, dep) in deps {
@@ -138,11 +135,10 @@ pub fn parse_with_registry(input: &str, npmrc: &BTreeMap<String, String>) -> Res
         }
     }
     let mut patches = BTreeMap::new();
-    for id in lock.snapshots.keys() {
+    for id in section("snapshots")?.keys() {
         let base = crate::native::base_id(id);
         if let Some(hash) = crate::native::patch_hash(id) {
-            let patch = lock
-                .patched_dependencies
+            let patch = patched_dependencies
                 .values()
                 .find(|p| p["hash"].as_str() == Some(hash))
                 .context("missing patch declaration")?;
@@ -157,7 +153,7 @@ pub fn parse_with_registry(input: &str, npmrc: &BTreeMap<String, String>) -> Res
     Ok(Plan {
         format: 1,
         packages,
-        has_patches: !lock.patched_dependencies.is_empty(),
+        has_patches: !patched_dependencies.is_empty(),
         patches,
         target_packages: BTreeMap::new(),
         dependency_files: BTreeSet::new(),

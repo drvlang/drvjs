@@ -28,3 +28,5 @@ url = "2"
 flate2 = "1.1.10"
 tar = "0.4.46"
 node-semver = "2.2.0"
+# pnpm 12.21.0's reader restores v13 peer snapshots without resolving dependencies.
+pnpm-lockfile = { git = "https://github.com/pnpm/pnpm", rev = "b8d388835f9a40ee1ac53fbc2d4b58c3ebfa5600" }

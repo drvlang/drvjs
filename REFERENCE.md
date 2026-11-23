@@ -403,9 +403,11 @@ using your own exported project and already-fetched inputs.
 
 ## How it works
 
-1. Rust reads the v9 lockfile, matches selectors, and walks importer links and
-   package snapshots. It retains only reachable importers, package resolutions,
-   peer-context snapshots, and used catalog entries. Version specifiers,
+1. Flake workspace discovery reads importer paths from the project document.
+   Selection and export restore compact v13 peer snapshots, match selectors,
+   and walk importer links and package snapshots. The projected lockfile retains
+   only reachable importers, package resolutions, peer-context snapshots, and
+   used catalog entries. Version specifiers,
    integrity hashes and selected dependency edges are preserved. Declared patches
    are pruned with the selection; root settings and the pnpm hook are retained.
 2. Nix fetches retained tarballs reachable under the locked platform constraints
@@ -424,9 +426,10 @@ using your own exported project and already-fetched inputs.
    Retaining a verification store is optional; `drvjs verify` performs
    independent offline pnpm reconstruction and compares the installed tree.
 
-For a single non-workspace project with no filters, the exported lockfile preserves
-the original bytes unless a URL-only resolution needs an integrity hash. drvjs
-fetches those URLs during export and records SHA-512 in the exported lockfile.
+An unfiltered single-package v9 export can preserve the original lockfile bytes.
+Newer formats are projected to v9. drvjs creates the fetch plan directly from
+the in-memory graph. For a URL-only resolution it fetches the tarball during
+export and records SHA-512 in the exported lockfile.
 Review and retain that export to pin the bytes of URLs that have no upstream
 integrity hash. Workspace exports deliberately contain a **projection**, not a
 byte-identical copy of the complete original lockfile. The assembled output's
@@ -550,8 +553,7 @@ disabled. Hook environments are cleared, with `CI=true` and
 
 Tested with [Vue v3.5.22](https://github.com/vuejs/core/tree/5a8aa0b2ba575e098cbb63b396e9bcb751eb3a0f),
 whose repository declares pnpm 10.17.1. drvjs uses pinned pnpm 10.34.5 with
-automatic package-manager switching disabled. Vue's newer main branch uses
-pnpm 12 split lockfiles, which are not supported yet.
+automatic package-manager switching disabled.
 
 | Selection | Selected importers | Nix tarball fetches on x86_64 Linux | Installed registry package instances |
 |---|---:|---:|---:|
@@ -581,6 +583,27 @@ bash tests/vue-workspace.sh
 # Or reuse an existing checkout at the exact pinned revision:
 bash tests/vue-workspace.sh /path/to/vue-v3.5.22
 ```
+
+## Lockfile planning performance
+
+These are median CLI times on an Intel i7-1280P running Linux. Both release
+binaries used the same Vue v3.5.22 checkout with 18 workspace projects and
+741 locked packages. The v9 input is Vue's original lockfile. The v12 input
+changes its version header. The v13 input uses pnpm's compact writer and
+includes the package-manager boot document.
+
+| Format | List workspace paths | Export `@vue/compiler-sfc` | Export whole workspace |
+|---|---:|---:|---:|
+| 9.0 | 8.1 → 6.1 ms | 15.1 → 12.4 ms | 30.2 → 24.6 ms |
+| 12.0 | 8.5 → 6.1 ms | 15.1 → 13.2 ms | 30.5 → 24.8 ms |
+| 13.0 | 14.8 → 2.3 ms | 23.2 → 18.7 ms | 41.0 → 31.5 ms |
+
+The benchmark alternates the previous and optimized binaries for 15 runs each
+after warm-up. It compares workspace metadata and the bytes of each projected
+lockfile and fetch plan. Export timings end when the CLI finishes writing the
+export. On pnpm v12.21.0's own v13 lockfile, listing all 237 projects took
+39.5 → 5.5 ms and peak memory fell from 23.7 to 7.2 MiB (nine-run medians).
+[Benchmark script](benchmarks/lockfiles.py) · [Inputs and samples](benchmarks/lockfiles-2026-11-22.json)
 
 ## Materialization performance
 
@@ -890,7 +913,14 @@ but commands that modify dependencies need a writable project/install directory.
 
 ## Current limits
 
-- Linux; pinned pnpm 10.34.5, lockfile format 9.0. ARM64 is declared but not tested.
+- Linux. The CLI and flake helpers accept lockfile formats 9.0, 12.0 and
+  experimental 13.0. drvjs reads the project document, expands compact workspace
+  links and peer snapshots, and writes a format 9.0 lockfile inside the export.
+  Offline verification uses pnpm 10.34.5. ARM64 is declared but not tested.
+- A boot document can pin the package manager. Its packages stay out of the
+  application graph. Boot config dependencies, pnpr revisions and uncompressed
+  tar integrity are unsupported. npm registry prefixes can be declared through
+  `namedRegistries` or `registries` in `pnpm-workspace.yaml`.
 - Registry packages and explicit HTTP(S) tarballs with SHA-256/384/512 integrity.
   HTTPS is required except for loopback test registries. URL-only resolutions are
   hashed during export; Git dependencies remain unsupported.
@@ -921,6 +951,7 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo fmt --check
 nix build
 PATH="$PWD/result/bin:$PATH" bash tests/integration.sh
+PATH="$PWD/result/bin:$PATH" python3 tests/lockfiles.py
 PATH="$PWD/result/bin:$PATH" bash tests/vue-workspace.sh
 PATH="$PWD/result/bin:$PATH" bash tests/configured.sh
 PATH="$PWD/result/bin:$PATH" bash tests/unpacked.sh

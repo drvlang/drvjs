@@ -1,0 +1,26 @@
+{
+	"lockfileVersion": "13.0",
+
+	"settings": {
+		"autoInstallPeers": true,
+		"excludeLinksFromLockfile": false,
+		"patchedDependencies": {
+			"is-number@7.0.0": "4fe3bf25d2e2b27c1a25301c8ae94d7d4aecc5bccd5bb27800b0040252778b88",
+		},
+	},
+
+	"projects": {
+		".": {
+			"dependencies": {
+				"is-number": "7.0.0",
+			},
+		},
+	},
+
+	"packages": {
+		"is-number@7.0.0": {
+			"integrity": "sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==",
+			"engines": {"node": ">=0.12.0"},
+		},
+	},
+}

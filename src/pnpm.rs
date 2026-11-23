@@ -8,6 +8,10 @@ fn run(cwd: &Path, args: &[&str]) -> Result<()> {
     let started = Instant::now();
     let status = Command::new("pnpm")
         .args(args)
+        .args([
+            "--config.manage-package-manager-versions=false",
+            "--config.package-manager-strict=false",
+        ])
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("HOME", home.path())
@@ -39,8 +43,6 @@ pub fn install(root: &Path) -> Result<()> {
             "--store-dir",
             store.to_str().context("non-UTF8 path")?,
             "--package-import-method=copy",
-            "--config.manage-package-manager-versions=false",
-            "--config.package-manager-strict=false",
         ],
     )
 }

@@ -45,19 +45,22 @@ fn snapshot(root: &Path) -> Result<BTreeMap<PathBuf, Entry>> {
                         }
                     }
                     data["storeDir"] = "<STORE>".into();
+                    data.sort_all_objects();
                     content = serde_json::to_string(&data)?
                         .replace(root.to_str().context("non-UTF8 path")?, "<ROOT>")
                         .into_bytes();
                 } else if relative == Path::new(".pnpm/lock.yaml") {
                     // YAML formatting is not installation state. Compare its full
                     // parsed value, retaining all package and importer metadata.
-                    let data: Value = serde_yaml_ng::from_slice(&content)?;
+                    let mut data: Value = serde_yaml_ng::from_slice(&content)?;
+                    data.sort_all_objects();
                     content = serde_json::to_vec(&data)?;
                 } else if relative == Path::new(".pnpm-workspace-state-v1.json") {
                     let mut data: Value = serde_json::from_slice(&content)?;
                     data.as_object_mut()
                         .context("invalid workspace metadata")?
                         .remove("lastValidatedTimestamp");
+                    data.sort_all_objects();
                     content = serde_json::to_string(&data)?
                         .replace(root.to_str().context("non-UTF8 path")?, "<ROOT>")
                         .into_bytes();
