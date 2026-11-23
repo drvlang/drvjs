@@ -1,5 +1,7 @@
 # drvjs reference
 
+Nix determines the content-addressed store path of each installed project, dependency layer, and prepared package when it builds that output. Use `nix build --print-out-paths --no-link` to obtain the realized path. Registry downloads keep the integrity hashes from pnpm.
+
 ## Standalone exports
 
 Run directly from GitHub with `nix run github:drvlang/drvjs -- --help`, or

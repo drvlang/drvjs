@@ -19,7 +19,7 @@ cmp "$scratch/pristine.ts" "$scratch/direct/node_modules/micro-memoize/src/Cache
 result=$(nix-build "$scratch/export" --no-out-link)
 cmp "$scratch/pristine.ts" "$result/node_modules/micro-memoize/src/Cache.ts"
 drvjs verify "$result"
-nix-build "$scratch/export" --no-out-link --check
+bash "$(dirname "$0")/rebuild.sh" "$result" "$scratch/export"
 # The very same postimage is legitimate in a pnpm store, too.
 drvjs assemble "$scratch/export/project" "$scratch/cached" /dev/null --unpacked-store "$scratch/store"
 cmp "$scratch/pristine.ts" "$scratch/cached/node_modules/micro-memoize/src/Cache.ts"

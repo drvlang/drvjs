@@ -2,6 +2,8 @@
 
 drvjs builds a pnpm project's `node_modules` with Nix. Each locked npm tarball has its own store path, so a fresh CI runner can reuse unchanged packages from your binary cache. In a monorepo, you can build or test one workspace package together with the local packages it imports.
 
+Installed projects, dependency layers, and checks are content-addressed by default. Two builds that produce the same files and store references can reuse the same output path. To publish a cached build with its realisation information, use a derivation-aware copy such as `nix copy --to "$CACHE" .#app` from the consumer flake.
+
 ## Try it
 
 From a project with `package.json` and `pnpm-lock.yaml`, use Nix with flakes on Linux (x86-64 or arm64). drvjs reads lockfile formats **9.0**, **12.0** and experimental **13.0**, including files with a separate pnpm version pin. The CLI supplies Node and pnpm. Enable `nix-command flakes ca-derivations dynamic-derivations recursive-nix` in `extra-experimental-features` and `recursive-nix ca-derivations` in `extra-system-features` on the client and builder.

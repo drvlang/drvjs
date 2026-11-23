@@ -1,9 +1,10 @@
 { pkgs, dynamicFile ? null }:
 let
   version = "0.1.0";
+  ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
   # This derivation is sufficient for production assembly. Keeping it separate
   # also avoids evaluating/building host tools when the helper is not cached.
-  unwrapped = pkgs.rustPlatform.buildRustPackage {
+  unwrapped = pkgs.rustPlatform.buildRustPackage (ca // {
     pname = "drvjs";
     inherit version;
     name = "drvjs-${version}-unwrapped";
@@ -22,8 +23,8 @@ let
       platforms = [ "x86_64-linux" "aarch64-linux" ];
       mainProgram = "drvjs";
     };
-  };
-  entry = pkgs.writeText "drvjs-project.nix" ''
+  });
+  entry = (pkgs.writeText "drvjs-project.nix" ''
     { directory, options }:
     let pkgs = import ${pkgs.path} { system = "${pkgs.stdenv.hostPlatform.system}"; };
         project = import ${./.}/project.nix {
@@ -32,12 +33,12 @@ let
           dynamic = import ${dynamicFile} { inherit pkgs; };
         };
     in project.mkJsPackage ((builtins.fromJSON options) // { src = /. + directory; })
-  '';
-in pkgs.runCommand "drvjs-${version}" {
+  '').overrideAttrs (_: ca);
+in pkgs.runCommand "drvjs-${version}" (ca // {
   nativeBuildInputs = [ pkgs.makeWrapper ];
   passthru = { inherit unwrapped; };
   inherit (unwrapped) meta;
-} ''
+}) ''
   mkdir -p "$out/bin"
   makeWrapper ${unwrapped}/bin/drvjs "$out/bin/drvjs" ${pkgs.lib.optionalString (dynamicFile != null) "--set DRVJS_ENTRY ${entry}"} --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.pnpm_10 pkgs.nodejs pkgs.curl pkgs.nix pkgs.gitMinimal ]}
 ''

@@ -7,7 +7,7 @@ for fixture in fixture configured; do
     drvjs export --keep-verification-store -C "$repo/tests/$fixture" -o "$scratch/$fixture"
     result=$(nix-build "$scratch/$fixture" --no-out-link)
     drvjs verify "$result"
-    nix-build "$scratch/$fixture" --no-out-link --check
+    bash "$(dirname "$0")/rebuild.sh" "$result" "$scratch/$fixture"
     drvjs assemble "$scratch/$fixture/project" "$scratch/$fixture-cached" /dev/null --unpacked-store "$result/.pnpm-store" --keep-verification-store
     drvjs verify "$scratch/$fixture-cached"
     minimal=$(nix-build "$scratch/$fixture" --no-out-link --arg keepVerificationStore false)
@@ -15,11 +15,11 @@ for fixture in fixture configured; do
     drvjs verify "$minimal" --store "$result/.pnpm-store"
     cached=$(nix-build "$scratch/$fixture" --no-out-link --arg keepVerificationStore false --arg cachePackages true)
     drvjs verify "$cached" --store "$result/.pnpm-store"
-    nix-build "$scratch/$fixture" --no-out-link --arg keepVerificationStore false --arg cachePackages true --check
+    bash "$(dirname "$0")/rebuild.sh" "$cached" "$scratch/$fixture" --arg keepVerificationStore false --arg cachePackages true
     nix-store --verify-path "$result"
     prepared=$(nix-build "$scratch/$fixture" --no-out-link --arg zstdArchives true)
     drvjs verify "$prepared"
-    nix-build "$scratch/$fixture" --no-out-link --arg zstdArchives true --check
+    bash "$(dirname "$0")/rebuild.sh" "$prepared" "$scratch/$fixture" --arg zstdArchives true
     prepared_minimal=$(nix-build "$scratch/$fixture" --no-out-link --arg zstdArchives true --arg keepVerificationStore false)
     test ! -e "$prepared_minimal/.pnpm-store"
     drvjs verify "$prepared_minimal" --store "$prepared/.pnpm-store"

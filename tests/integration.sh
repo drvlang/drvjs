@@ -13,7 +13,7 @@ if drvjs verify "$minimal" > "$scratch/missing-store.log" 2>&1; then
     echo 'FAIL: absent verification store was accepted' >&2; exit 1
 fi
 grep -q 'keep-verification-store' "$scratch/missing-store.log"
-nix-build "$scratch/export" --no-out-link --check
+bash "$(dirname "$0")/rebuild.sh" "$minimal" "$scratch/export"
 result=$(nix-build "$scratch/export" --no-out-link --arg keepVerificationStore true)
 test -d "$result/.pnpm-store"
 cmp "$repo/tests/fixture/pnpm-lock.yaml" "$result/pnpm-lock.yaml"
@@ -31,7 +31,7 @@ test "$(bash "$result/node_modules/.bin/semver" 1.2.3)" = 1.2.3
 # A second realization must reuse the output; --check forces an independent
 # assembly and compares the NAR, including timestamps/links/metadata.
 test "$(nix-build "$scratch/export" --no-out-link --arg keepVerificationStore true)" = "$result"
-nix-build "$scratch/export" --no-out-link --arg keepVerificationStore true --check
+bash "$(dirname "$0")/rebuild.sh" "$result" "$scratch/export" --arg keepVerificationStore true
 
 # Verify must detect changed installed bytes, even with an untouched store.
 cp -R "$result" "$scratch/tampered"

@@ -100,5 +100,5 @@ with tempfile.TemporaryDirectory(prefix='drvjs-registry-') as tmp:
     result = run('nix-build', str(export), '--no-out-link', stdout=subprocess.PIPE).stdout.strip()
     run('node', '-e', "require('node:assert/strict').equal(require('@fixture/private'), 42)", cwd=result)
     run('drvjs', 'verify', result)
-    run('nix-build', str(export), '--no-out-link', '--check')
+    run('bash', str(Path(__file__).with_name('rebuild.sh')), result, str(export))
     print('PASS: URL-only resolution, scoped authentication/redirects, secret exclusion, integrity rejection, cached offline build and verification')

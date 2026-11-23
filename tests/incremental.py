@@ -147,6 +147,11 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
             return evaluate(graph, 'builtins.mapAttrs (_: v: v.drvPath) graph.packageContents')
 
         def build(graph, *extra):
+            if '--check' in extra:
+                args = [arg for arg in extra if arg != '--check']
+                output = build(graph, *args)
+                run('bash', str(Path(__file__).with_name('rebuild.sh')), str(output), str(graph), *args)
+                return output
             return Path(run('nix-build', str(graph), '--no-out-link', *extra))
 
         def runtime(output, version):
@@ -169,6 +174,11 @@ with tempfile.TemporaryDirectory(prefix='drvjs-incremental-') as temporary:
         original_contents = contents(original)
         original_drv = evaluate(original, 'graph.drvPath')
         first = build(original)
+        # A recipe-only input changes the derivation but preserves the output.
+        clone = f'let graph = import {original} {{}}; in builtins.derivation (graph.drvAttrs // {{ testNonce = "second"; }})'
+        other_drv = run('nix-instantiate', '--expr', clone)
+        assert other_drv != original_drv
+        assert run('nix', 'build', '--impure', '--no-link', '--print-out-paths', '--expr', clone) == str(first)
         runtime(first, 1)
         dependency_drv = evaluate(original, 'graph.dependencies.drvPath')
         layer = build(original, '-A', 'dependencies')

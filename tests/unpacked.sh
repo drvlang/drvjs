@@ -8,7 +8,7 @@ for fixture in fixture configured; do
     cache=$(nix-build "$scratch/$fixture" --no-out-link --arg keepVerificationStore true)
     result=$(nix-build "$scratch/$fixture" --no-out-link --arg unpackedStore "$cache/.pnpm-store" --arg keepVerificationStore true)
     drvjs verify "$result"
-    nix-build "$scratch/$fixture" --no-out-link --arg unpackedStore "$cache/.pnpm-store" --arg keepVerificationStore true --check
+    bash "$(dirname "$0")/rebuild.sh" "$result" "$scratch/$fixture" --arg unpackedStore "$cache/.pnpm-store" --arg keepVerificationStore true
     minimal=$(nix-build "$scratch/$fixture" --no-out-link --arg unpackedStore "$cache/.pnpm-store")
     test ! -e "$minimal/.pnpm-store"
     (cd "$minimal" && pnpm list --depth 0 --json > "$scratch/$fixture-list.json")

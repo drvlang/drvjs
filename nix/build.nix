@@ -16,6 +16,9 @@
   keepVerificationStore ? (builtins.fromJSON (builtins.readFile ./options.json)).keepVerificationStore
 }:
 let
+  ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
+  derivation = args: builtins.derivation (args // ca);
+  text = name: value: (pkgs.writeText name value).overrideAttrs (_: ca);
   active = builtins.listToAttrs (map (id: { name = id; value = true; })
     (plan.targetPackages.${pkgs.stdenv.hostPlatform.system} or
       ((map (p: p.id) plan.packages) ++ builtins.attrNames (plan.patches or {}))));
@@ -32,7 +35,7 @@ let
     };
   }) packages;
   fetched = builtins.listToAttrs tarballs;
-  gzipSources = pkgs.writeText "drvjs-tarballs.json" (builtins.toJSON (map (package: {
+  gzipSources = text "drvjs-tarballs.json" (builtins.toJSON (map (package: {
     inherit (package) id path;
     file = fetched.${package.path};
   }) packages));
@@ -40,9 +43,9 @@ let
   # separately reusable Nix output with a digest checked by the assembler.
   prepared = builtins.listToAttrs (map (package: {
     name = package.path;
-    value = pkgs.runCommand "${package.name}-zstd" {
+    value = pkgs.runCommand "${package.name}-zstd" (ca // {
       nativeBuildInputs = [ pkgs.gzip pkgs.zstd pkgs.openssl ];
-    } ''
+    }) ''
       set -euo pipefail
       mkdir "$out"
       gzip -dc ${fetched.${package.path}} | zstd -q -1 -o "$out/archive.tar.zst"
@@ -50,13 +53,13 @@ let
       openssl dgst -sha512 -binary "$out/archive.tar.zst" | openssl base64 -A >> "$out/integrity"
     '';
   }) packages);
-  preparedSources = pkgs.writeText "drvjs-prepared-inputs.json" (builtins.toJSON (map (package: {
+  preparedSources = text "drvjs-prepared-inputs.json" (builtins.toJSON (map (package: {
     inherit (package) id path;
     file = "${prepared.${package.path}}/archive.tar.zst";
     sourceIntegrity = package.hash;
     integrityFile = "${prepared.${package.path}}/integrity";
   }) packages));
-  sources = if !zstdArchives then gzipSources else pkgs.runCommand "drvjs-prepared-tarballs.json" {} ''
+  sources = if !zstdArchives then gzipSources else pkgs.runCommand "drvjs-prepared-tarballs.json" ca ''
     ${pkgs.python3}/bin/python3 - ${preparedSources} "$out" <<'PY'
 import json, pathlib, sys
 sources = json.loads(pathlib.Path(sys.argv[1]).read_text())
@@ -69,7 +72,7 @@ PY
   # A dependency update reuses the extraction of every unchanged package.
   contents = builtins.listToAttrs (map (package: {
     name = package.id;
-    value = builtins.derivation {
+    value = derivation {
       name = "${package.name}-contents";
       inherit (drvjs.unwrapped) system;
       builder = "${drvjs.unwrapped}/bin/drvjs";
@@ -77,7 +80,7 @@ PY
     };
   }) packages);
   patchedContents = builtins.mapAttrs (_: patch:
-    builtins.derivation {
+    derivation {
       name = "drvjs-patched-package";
       inherit (drvjs.unwrapped) system;
       builder = "${drvjs.unwrapped}/bin/drvjs";
@@ -90,7 +93,7 @@ PY
   # Retained/external pnpm stores and the explicit zstd experiment keep their
   # original assembly path. Package contents are already decompressed.
   useContents = cachePackages && !keepVerificationStore && unpackedStore == null && !zstdArchives;
-  contentsManifest = pkgs.writeText "drvjs-package-contents.json"
+  contentsManifest = text "drvjs-package-contents.json"
     (builtins.toJSON (builtins.mapAttrs (_: toString) packageContents));
   nativeBuildInputs = [ drvjs.unwrapped ]
     ++ pkgs.lib.optional (!(cacheDependencies || sharedDependencies) && !useContents && (plan.hasPatches or true)) pkgs.gitMinimal;
@@ -109,7 +112,7 @@ PY
   };
   # Assembly is self-contained Rust. No shell/stdenv setup or tool closure is
   # needed; only patches require Git. Keep arguments separate from shell syntax.
-  assemble = project: name: shared: builtins.derivation {
+  assemble = project: name: shared: derivation {
     inherit name;
     outputs = if shared then [ "out" "packages" ] else [ "out" ];
     inherit (drvjs.unwrapped) system;
@@ -117,14 +120,14 @@ PY
     preferLocalBuild = true;
     PATH = pkgs.lib.makeBinPath (pkgs.lib.optional (!useContents && (plan.hasPatches or true)) pkgs.gitMinimal);
     args = [ "assemble" project (builtins.placeholder "out")
-      (if unpackedStore == null && !useContents then sources else pkgs.writeText "unused-tarballs.json" "[]") ]
+      (if unpackedStore == null && !useContents then sources else text "unused-tarballs.json" "[]") ]
       ++ pkgs.lib.optionals (unpackedStore != null) [ "--unpacked-store" unpackedStore ]
       ++ pkgs.lib.optional keepVerificationStore "--keep-verification-store"
       ++ pkgs.lib.optionals useContents [ "--package-contents" contentsManifest ]
       ++ pkgs.lib.optionals shared [ "--shared-packages" (builtins.placeholder "packages") ];
   };
   dependencies = assemble dependencyProject "drvjs-dependencies" sharedDependencies;
-  attached = builtins.derivation {
+  attached = derivation {
     name = "drvjs-node-modules";
     inherit (drvjs.unwrapped) system;
     builder = "${drvjs.unwrapped}/bin/drvjs";

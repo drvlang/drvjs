@@ -15,7 +15,7 @@ assert.equal(typeof resolve('has-flag'), 'function');
 assert.equal(require('is-array')([]), true);
 JS
 )
-nix-build "$scratch/export" --no-out-link --check
+bash "$(dirname "$0")/rebuild.sh" "$result" "$scratch/export"
 cp -R "$result" "$scratch/tampered"
 chmod -R u+w "$scratch/tampered"
 printf '\n// corrupted patched package\n' >> "$scratch/tampered/node_modules/is-number/index.js"

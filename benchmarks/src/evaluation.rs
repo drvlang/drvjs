@@ -154,7 +154,7 @@ pub fn rebuild(a: Rebuild) -> Result<()> {
                 fs::write(p.join("project").join(marker), &content)?;
             }
             let mut cmd = build_args(&p);
-            if a.fresh {
+            if a.fresh || !a.source_edits {
                 cmd = argv![
                     "nix-build",
                     "--expr",
@@ -164,15 +164,16 @@ pub fn rebuild(a: Rebuild) -> Result<()> {
                     p,
                     "--argstr",
                     "nonce",
-                    format!("{nonce}-{trial}"),
+                    format!("{nonce}-{mode}-{trial}"),
+                    "--arg",
+                    "freshDependencies",
+                    if a.fresh { "true" } else { "false" },
                     "--no-out-link",
                     "--max-jobs",
                     "4",
                     "--cores",
                     "4"
                 ];
-            } else if !a.source_edits {
-                cmd.push("--check".into());
             }
             let log = log_file(&root, &format!("{mode}-{trial}.log"))?;
             let (result, seconds) = measured(|| logged(&cmd, &log))?;

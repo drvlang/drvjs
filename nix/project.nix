@@ -1,6 +1,7 @@
 { pkgs, drvjs, dynamic }:
 let
   inherit (pkgs) lib;
+  ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
   workspace = src: import ./workspace.nix { inherit lib src; };
   mkJsPackage = args@{
     src, package ? null, target ? package, filters ? [], cachePackages ? false, cacheDependencies ? false, dependenciesOnly ? false,
@@ -37,12 +38,12 @@ let
     };
   mkApp = package: script: {
     type = "app";
-    program = toString (pkgs.writeShellScript "drvjs-run" ''
+    program = toString ((pkgs.writeShellScript "drvjs-run" ''
       exec ${drvjs}/bin/drvjs run-script ${package} ${lib.escapeShellArg package.primary} ${lib.escapeShellArg script} -- "$@"
-    '');
+    '').overrideAttrs (_: ca));
     meta.description = "Run the ${script} package script";
   };
-  mkTest = args: let package = mkJsPackage args; in pkgs.runCommand "drvjs-tests" {} ''
+  mkTest = args: let package = mkJsPackage args; in pkgs.runCommand "drvjs-tests" ca ''
     export HOME="$TMPDIR"
     if ${pkgs.jq}/bin/jq -e '.scripts.test | type == "string"' ${package}/${lib.escapeShellArg package.primary}/package.json >/dev/null; then
       ${drvjs}/bin/drvjs run-script ${package} ${lib.escapeShellArg package.primary} test

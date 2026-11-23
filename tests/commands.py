@@ -100,6 +100,10 @@ with tempfile.TemporaryDirectory(prefix="drvjs-commands-") as tmp:
             "@demo/api", "@demo/worker", "shared"]
     nix("flake", "check")
     output = Path(nix("build", ".#@demo/api", "--print-out-paths", "--no-link"))
+    check = nix("build", f'.#checks.{system}."@demo/api"', "--print-out-paths", "--no-link")
+    for artifact in (str(output), str(output.resolve()), check):
+        info = json.loads(run("nix", "path-info", "--json", artifact).stdout)
+        assert info[artifact]["ca"].startswith("fixed:r:sha256:"), info
     assert not (output / "apps/worker").exists()
     assert compare(nix("run", ".#@demo/api", "--", "via nix"), "via nix")
     assert compare(cli("test", "@demo/api", "--", "via cli").stdout, "via cli")

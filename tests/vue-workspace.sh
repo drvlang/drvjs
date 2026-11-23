@@ -44,8 +44,8 @@ assert.equal(fs.existsSync(`${sfc}/packages/runtime-dom`), false);
 assert.equal(fs.existsSync(`${sfc}/node_modules/rollup`), false);
 console.log('PASS: Vue workspace links and installed third-party runtime imports');
 JS
-nix-build "$scratch/sfc" --no-out-link --check
-nix-build "$scratch/reactivity" --no-out-link --check
+bash "$(dirname "$0")/rebuild.sh" "$sfc" "$scratch/sfc"
+bash "$(dirname "$0")/rebuild.sh" "$reactivity" "$scratch/reactivity"
 # Changes in excluded workspace sources, root manifest, lock entries and unused
 # catalog entries must leave the entire selected derivation unchanged.
 printf '\n// unrelated drvjs test edit\n' >> "$scratch/vue/packages/runtime-dom/src/index.ts"

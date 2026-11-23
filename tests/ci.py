@@ -93,31 +93,34 @@ with tempfile.TemporaryDirectory(prefix='drvjs-ci-') as scratch:
             builder = eval_nix(f'(builtins.head ({expr}).tarballs).value.builder')
             assert builder == 'builtin:fetchurl', builder
             inputs = eval_nix(f'map toString ({expr}).nativeBuildInputs')
-            assert len(inputs) == 1 and inputs[0].endswith('-unwrapped'), inputs
+            assert len(inputs) == 1 and eval_nix(f'(builtins.head ({expr}).nativeBuildInputs).name').endswith('-unwrapped')
             assert eval_nix(f'({expr}).builder') == inputs[0] + '/bin/drvjs'
             assert eval_nix(f'builtins.head ({expr}).args') == 'assemble'
             drv = eval_nix(f'({expr}).drvPath')
+            output = run('nix-build', str(export), '--no-out-link')
+            info = json.loads(run('nix', 'path-info', '--json', output))
+            assert info[output]['ca'].startswith('fixed:r:sha256:'), info
             if args.iets:
                 env = dict(os.environ, IETS_NIX_FALLBACK='never', IETS_PROGRESS='false')
                 common = ['--impure', '--no-tracing-cache', '--option', 'allow-import-from-derivation', 'false']
                 for workers in ['1', '4']:
                     assert run(args.iets, 'eval', *common, '--workers', workers, '--raw', '-E', f'({expr}).drvPath', env=env) == drv
-                output = run(args.iets, 'build', *common, '--workers', '1', '-E', expr, env=env).splitlines()[-1]
-                assert output == eval_nix(f'({expr}).outPath')
-            output = run('nix-build', str(export), '--no-out-link')
+                rebuilt = run(args.iets, 'build', *common, '--workers', '1', '-E', expr, env=env).splitlines()[-1]
+                assert rebuilt == output
             assert requests, 'built-in fetcher did not download'
             requests.clear()
-            closure = run('nix-store', '-qR', *inputs).splitlines()
+            helper_drv = eval_nix(f'(builtins.head ({expr}).nativeBuildInputs).drvPath')
+            helper = run('nix', 'path-info', helper_drv + '^out')
+            closure = run('nix-store', '-qR', helper).splitlines()
             forbidden = ('-nodejs-', '-pnpm-', '-curl-', '-nix-', '-git-')
             assert not any(any(marker in path for marker in forbidden) for path in closure), closure
             # A cache miss on the helper must not build the host CLI wrapper
             # and its Node/pnpm dependencies either.
-            helper_drv = eval_nix(f'(builtins.head ({expr}).nativeBuildInputs).drvPath')
             build_closure = run('nix-store', '-qR', helper_drv).splitlines()
             assert not any('-nodejs-' in path or re.search(r'-pnpm-\d+\.\d+\.', path) for path in build_closure)
             run('node', '-e', "require('node:assert/strict').equal(require('ci-fixture'), 42)", cwd=output)
             assert not (Path(output) / '.pnpm-store').exists()
-            run('nix-build', str(export), '--no-out-link', '--check')
+            run('bash', str(Path(__file__).with_name('rebuild.sh')), output, str(export))
             if args.iets:
                 # An included source edit must invalidate assembly in iets,
                 # while reusing the existing immutable archive.

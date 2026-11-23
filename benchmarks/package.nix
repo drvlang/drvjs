@@ -2,6 +2,7 @@
 let
   inherit (pkgs) lib;
 in pkgs.rustPlatform.buildRustPackage {
+  __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
   pname = "drvjs-bench";
   version = "0.1.0";
   src = lib.fileset.toSource {
