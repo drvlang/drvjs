@@ -35,12 +35,12 @@ with tempfile.TemporaryDirectory(prefix="drvjs-commands-") as tmp:
         {
           inputs.drvjs.url = "github:drvlang/drvjs";
           outputs = { drvjs, ... }: drvjs.lib.HELPER {
-            src = drvjs.lib.projectSource {
+            src = (drvjs.lib.projectSource {
               root = ./.;
               files = builtins.filter builtins.pathExists [
                 ./package.json ./pnpm-lock.yaml ./pnpm-workspace.yaml ./start.js ./test.js ./apps ./libs
               ];
-            };
+            }) // { outPath = throw "discovery imported the entire workspace"; };
             EXTRA
           };
         }
@@ -122,6 +122,7 @@ with tempfile.TemporaryDirectory(prefix="drvjs-commands-") as tmp:
     original = api_drv()
     original_plan = dependency_plan()
     write("apps/worker/start.js", "// sibling edit")
+    write("apps/worker/generated/deep/unused.js", "// new sibling directory")
     write("docs/index.md", "irrelevant")
     write("notes.txt", "an unrelated top-level edit")
     run("git", "add", ".", cwd=root)

@@ -8,6 +8,7 @@
       eachSystem = lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
       packageSets = eachSystem (system: import nixpkgs { inherit system; });
       projects = eachSystem (system: import ./nix/project.nix {
+        readSource = import (drvkit + "/source-reader.nix") lib;
         pkgs = packageSets.${system};
         nixpkgsSource = nixpkgs.outPath;
         dynamic = import (drvkit + "/dynamic.nix") { pkgs = packageSets.${system}; };
@@ -49,11 +50,9 @@
       lib.mkMonorepoFlake = { src ? null, commands ? null, srcForTarget ? null, script ? "start", ... }@args:
         let
           project = if src == null then throw "drvjs: specify src for discovery or commands and srcForTarget" else src;
-          declared = if commands != null then commands else
-            (if builtins.pathExists (toString project + "/drvlang.json") then
-              (lib.importJSON (toString project + "/drvlang.json")).commands or null else null);
           perSystem = system: let
             workspace = projects.${system}.workspace project;
+            declared = if commands != null then commands else workspace.config.commands or null;
             targets = if declared == null then workspace.commands
               else if builtins.isList declared then lib.genAttrs declared (s: (workspace.select [ s ]).primary)
               else declared;

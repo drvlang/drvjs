@@ -1,9 +1,15 @@
 # Only read workspace membership during flake evaluation. Rust owns resolution,
 # package integrity and the final projection inside the recursive planner.
-{ lib, src }:
+{ lib, src, readSource ? null }:
 let
-  root = toString src;
-  lock = builtins.readFile (root + "/pnpm-lock.yaml");
+  # The installed CLI passes a raw directory. Flake consumers may pass a
+  # filtered lib.sources view, which can be inspected before it is imported.
+  source = if readSource != null then readSource src else {
+    readFile = rel: builtins.readFile (toString src + "/" + rel);
+    exists = rel: builtins.pathExists (toString src + "/" + rel);
+  };
+  config = if source.exists "drvlang.json" then builtins.fromJSON (source.readFile "drvlang.json") else {};
+  lock = source.readFile "pnpm-lock.yaml";
   document = lib.removePrefix "\n" (lib.last (lib.splitString "\n---\n" lock));
   canonicalCompact = lib.hasPrefix "{\n\t\"lockfileVersion\"" document;
   isJson = lib.hasPrefix "{" document && !canonicalCompact;
@@ -27,19 +33,19 @@ let
      else if lib.hasPrefix "'" key then builtins.replaceStrings [ "''" ] [ "'" ] (lib.removeSuffix "'" (lib.removePrefix "'" key))
      else key;
   importers = if isJson then json.projects or json.importers else {};
-  paths = if isJson then builtins.attrNames importers else builtins.filter (p: p != null) (map keyOf lines);
+  importerPaths = if isJson then builtins.attrNames importers else builtins.filter (p: p != null) (map keyOf lines);
   safe = p: p == "." || (p != "" && !(lib.hasPrefix "/" p)
     && builtins.all (s: !(builtins.elem s [ "." ".." "" ])) (lib.splitString "/" p));
-  manifests = lib.genAttrs paths (p: if !safe p then throw "drvjs: invalid importer path ${p}"
-    else lib.importJSON (root + "/${p}/package.json"));
+  paths = map (p: if safe p then p else throw "drvjs: invalid importer path ${p}") importerPaths;
+  manifests = lib.genAttrs paths (p: builtins.fromJSON (source.readFile "${p}/package.json"));
   commands = builtins.listToAttrs (map (p: {
     name = manifests.${p}.name or p; value = "./${p}";
   }) (builtins.filter (p: p != ".") paths));
   locate = selector: let
     s = lib.removeSuffix "..." selector;
     matches = builtins.filter (p: p == lib.removePrefix "./" s ||
-      (builtins.pathExists (root + "/${p}/package.json") && (manifests.${p}.name or null) == s)) paths;
-  in if lib.hasPrefix "./" s && builtins.pathExists (root + "/${s}/package.json")
+      (source.exists "${p}/package.json" && (manifests.${p}.name or null) == s)) paths;
+  in if lib.hasPrefix "./" s && source.exists "${s}/package.json"
      then lib.removePrefix "./" s
      else if builtins.length matches == 1 then builtins.head matches
      else throw "drvjs: expected exactly one workspace named ${selector}";
@@ -77,6 +83,10 @@ let
     kept = lib.genAttrs (map (item: item.key) closure) (_: true);
     include = rel: if rel == "." then true else if manifests ? ${rel} then kept ? ${rel}
       else include (dirOf rel);
+    # Only the route to an excluded importer's manifest needs to exist.
+    # Keeping all directories makes a sibling's new build tree a source edit.
+    ancestors = p: if p == "." then [] else [ p ] ++ ancestors (dirOf p);
+    importerDirs = lib.genAttrs (lib.concatMap ancestors paths) (_: true);
     metadata = lib.genAttrs (lib.concatMap (p: [ "${p}/package.json" "${p}/.npmrc" "${p}/.pnpmfile.cjs" ]) paths) (_: true);
   in {
     primary = if chosen == [] then "." else builtins.head chosen;
@@ -85,11 +95,11 @@ let
       filter = path: type: let rel = lib.removePrefix (toString (src.origSrc or src) + "/") path; in
         !(builtins.elem (baseNameOf path) [ ".git" "node_modules" ".pnpm-store" ".drvjs" ])
         && !(type == "symlink" && (rel == "result" || lib.hasPrefix "result-" rel))
-        && (!prune || type == "directory" || metadata ? ${rel} || include rel);
+        && (!prune || metadata ? ${rel} || include rel || (type == "directory" && importerDirs ? ${rel}));
     };
   };
 in {
-  inherit select;
+  inherit select config;
   commands = if builtins.length (builtins.attrNames commands) == builtins.length (builtins.filter (p: p != ".") paths)
     then commands else throw "drvjs: duplicate workspace name; set commands explicitly";
 }

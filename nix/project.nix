@@ -1,17 +1,17 @@
-{ pkgs, drvjs, dynamic, nixpkgsSource ? drvjs.nixpkgsSource }:
+{ pkgs, drvjs, dynamic, readSource ? null, nixpkgsSource ? drvjs.nixpkgsSource }:
 let
   inherit (pkgs) lib;
   ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
-  workspace = src: import ./workspace.nix { inherit lib src; };
+  workspace = src: import ./workspace.nix { inherit lib src readSource; };
   mkJsPackage = args@{
     src, package ? null, target ? package, filters ? [], cachePackages ? false, cacheDependencies ? false, dependenciesOnly ? false,
     sharedDependencies ? false, keepVerificationStore ? false, zstdArchives ? false
   }:
     let
-      configPath = toString src + "/drvlang.json";
-      aliases = if builtins.pathExists configPath then (lib.importJSON configPath).commands or {} else {};
+      project = workspace src;
+      aliases = project.config.commands or {};
       selectors = map (s: aliases.${s} or s) (lib.optional (target != null) target ++ filters);
-      selection = (workspace src).select selectors;
+      selection = project.select selectors;
       options = { inherit cachePackages cacheDependencies sharedDependencies keepVerificationStore zstdArchives; };
       # Only the graph output feeds dependency planning. Its CA path is stable
       # when application code changes, including on a fresh CI worker.
