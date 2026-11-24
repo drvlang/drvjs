@@ -80,9 +80,9 @@ let
     metadata = lib.genAttrs (lib.concatMap (p: [ "${p}/package.json" "${p}/.npmrc" "${p}/.pnpmfile.cjs" ]) paths) (_: true);
   in {
     primary = if chosen == [] then "." else builtins.head chosen;
-    src = builtins.path {
-      name = "js-source"; path = src;
-      filter = path: type: let rel = lib.removePrefix "${root}/" path; in
+    src = lib.cleanSourceWith {
+      name = "js-source"; inherit src;
+      filter = path: type: let rel = lib.removePrefix (toString (src.origSrc or src) + "/") path; in
         !(builtins.elem (baseNameOf path) [ ".git" "node_modules" ".pnpm-store" ".drvjs" ])
         && !(type == "symlink" && (rel == "result" || lib.hasPrefix "result-" rel))
         && (!prune || type == "directory" || metadata ? ${rel} || include rel);

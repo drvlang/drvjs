@@ -9,6 +9,7 @@
       packageSets = eachSystem (system: import nixpkgs { inherit system; });
       projects = eachSystem (system: import ./nix/project.nix {
         pkgs = packageSets.${system};
+        nixpkgsSource = nixpkgs.outPath;
         dynamic = import (drvkit + "/dynamic.nix") { pkgs = packageSets.${system}; };
         drvjs = self.packages.${system}.drvjs;
       });
@@ -19,7 +20,11 @@
       };
     in {
       packages = eachSystem (system: rec {
-        drvjs = import ./nix/package.nix { pkgs = packageSets.${system}; dynamicFile = drvkit + "/dynamic.nix"; };
+        drvjs = import ./nix/package.nix {
+          pkgs = packageSets.${system};
+          nixpkgsSource = nixpkgs.outPath;
+          dynamicFile = drvkit + "/dynamic.nix";
+        };
         default = drvjs;
         bench = import ./benchmarks/package.nix { pkgs = packageSets.${system}; };
       });

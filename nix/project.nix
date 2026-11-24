@@ -1,4 +1,4 @@
-{ pkgs, drvjs, dynamic }:
+{ pkgs, drvjs, dynamic, nixpkgsSource ? drvjs.nixpkgsSource }:
 let
   inherit (pkgs) lib;
   ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
@@ -30,7 +30,7 @@ let
       build = dynamic {
         name = "drvjs-installation";
         expression = ''
-          let pkgs = import ${pkgs.path} { system = "${pkgs.stdenv.hostPlatform.system}"; };
+          let pkgs = import ${nixpkgsSource} { system = "${pkgs.stdenv.hostPlatform.system}"; };
               graph = import ${projection.graph}/default.nix ((builtins.fromJSON ${builtins.toJSON (builtins.toJSON options)}) // {
             inherit pkgs;
             drvjs.unwrapped = {

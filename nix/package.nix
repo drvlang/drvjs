@@ -1,4 +1,10 @@
-{ pkgs, dynamicFile ? null }:
+{ pkgs, dynamicFile ? null, nixpkgsSource ?
+  # Standalone exports also accept a caller-supplied planner file.
+  let path = toString pkgs.path; in
+  if builtins.hasContext path then path
+  else if pkgs.lib.isStorePath path then builtins.appendContext path { ${path}.path = true; }
+  else builtins.path { path = pkgs.path; }
+}:
 let
   version = "0.1.0";
   ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
@@ -24,11 +30,16 @@ let
       mainProgram = "drvjs";
     };
   });
+  projectFiles = pkgs.lib.fileset.toSource {
+    root = ./.;
+    fileset = pkgs.lib.fileset.unions [ ./project.nix ./workspace.nix ];
+  };
   entry = (pkgs.writeText "drvjs-project.nix" ''
     { directory, options }:
-    let pkgs = import ${pkgs.path} { system = "${pkgs.stdenv.hostPlatform.system}"; };
-        project = import ${./.}/project.nix {
-          inherit pkgs;
+    let nixpkgsSource = builtins.storePath "${nixpkgsSource}";
+        pkgs = import nixpkgsSource { system = "${pkgs.stdenv.hostPlatform.system}"; };
+        project = import ${projectFiles}/project.nix {
+          inherit pkgs nixpkgsSource;
           drvjs.unwrapped = { outPath = builtins.storePath "${unwrapped}"; system = "${pkgs.stdenv.hostPlatform.system}"; };
           dynamic = import ${dynamicFile} { inherit pkgs; };
         };
@@ -36,7 +47,7 @@ let
   '').overrideAttrs (_: ca // { allowSubstitutes = true; });
 in pkgs.runCommand "drvjs-${version}" (ca // {
   nativeBuildInputs = [ pkgs.makeWrapper ];
-  passthru = { inherit unwrapped; };
+  passthru = { inherit unwrapped nixpkgsSource; };
   inherit (unwrapped) meta;
 }) ''
   mkdir -p "$out/bin"
