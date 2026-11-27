@@ -1,12 +1,9 @@
+use crate::hash::{Sha256, base64_decode, hex_encode};
 use anyhow::{Context, Result, bail, ensure};
-use base64::{Engine, engine::general_purpose::STANDARD};
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use sha2::{Digest, Sha256};
+use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Package {
     pub id: String,
     pub path: String,
@@ -15,18 +12,166 @@ pub struct Package {
     pub name: String,
     pub private: bool,
 }
-#[derive(Serialize, Deserialize)]
+
+impl Package {
+    pub fn to_value(&self) -> Value {
+        json!({
+            "id": self.id,
+            "path": self.path,
+            "url": self.url,
+            "hash": self.hash,
+            "name": self.name,
+            "private": self.private,
+        })
+    }
+
+    pub fn from_value(v: &Value) -> Result<Self> {
+        Ok(Self {
+            id: v["id"].as_str().context("package missing id")?.to_owned(),
+            path: v["path"]
+                .as_str()
+                .context("package missing path")?
+                .to_owned(),
+            url: v["url"].as_str().context("package missing url")?.to_owned(),
+            hash: v["hash"]
+                .as_str()
+                .context("package missing hash")?
+                .to_owned(),
+            name: v["name"]
+                .as_str()
+                .context("package missing name")?
+                .to_owned(),
+            private: v["private"]
+                .as_bool()
+                .context("package missing private")?,
+        })
+    }
+}
+
 pub struct Plan {
     pub format: u32,
     pub packages: Vec<Package>,
-    #[serde(rename = "hasPatches", default)]
     pub has_patches: bool,
-    #[serde(default)]
     pub patches: BTreeMap<String, Value>,
-    #[serde(rename = "targetPackages", default)]
     pub target_packages: BTreeMap<String, BTreeSet<String>>,
-    #[serde(rename = "dependencyFiles", default)]
     pub dependency_files: BTreeSet<String>,
+}
+
+impl Plan {
+    pub fn to_value(&self) -> Value {
+        let mut obj = Map::new();
+        obj.insert("format".into(), json!(self.format));
+        obj.insert(
+            "packages".into(),
+            Value::Array(self.packages.iter().map(Package::to_value).collect()),
+        );
+        obj.insert("hasPatches".into(), json!(self.has_patches));
+        obj.insert(
+            "patches".into(),
+            Value::Object(
+                self.patches
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            ),
+        );
+        obj.insert(
+            "targetPackages".into(),
+            Value::Object(
+                self.target_packages
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            k.clone(),
+                            Value::Array(v.iter().map(|s| Value::String(s.clone())).collect()),
+                        )
+                    })
+                    .collect(),
+            ),
+        );
+        obj.insert(
+            "dependencyFiles".into(),
+            Value::Array(
+                self.dependency_files
+                    .iter()
+                    .map(|s| Value::String(s.clone()))
+                    .collect(),
+            ),
+        );
+        Value::Object(obj)
+    }
+
+    pub fn from_value(v: &Value) -> Result<Self> {
+        let format = v["format"].as_u64().context("plan missing format")? as u32;
+        let packages = v["packages"]
+            .as_array()
+            .context("plan missing packages")?
+            .iter()
+            .map(Package::from_value)
+            .collect::<Result<Vec<_>>>()?;
+        let has_patches = v.get("hasPatches").and_then(Value::as_bool).unwrap_or(false);
+        let patches = v
+            .get("patches")
+            .and_then(Value::as_object)
+            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+        let target_packages = v
+            .get("targetPackages")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.iter()
+                    .map(|(k, arr)| {
+                        let set = arr
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|s| s.as_str().map(str::to_owned))
+                            .collect();
+                        (k.clone(), set)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let dependency_files = v
+            .get("dependencyFiles")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s.as_str().map(str::to_owned))
+            .collect();
+        Ok(Self {
+            format,
+            packages,
+            has_patches,
+            patches,
+            target_packages,
+            dependency_files,
+        })
+    }
+}
+
+fn is_pkg_name_segment(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+}
+
+fn split_package_identity(id: &str) -> Option<(&str, &str)> {
+    let rest = id.get(1..)?;
+    let at = rest.find('@')? + 1;
+    let name = &id[..at];
+    let version = &id[at + 1..];
+    if version.is_empty() {
+        return None;
+    }
+    let valid_name = if let Some(scoped) = name.strip_prefix('@') {
+        scoped
+            .split_once('/')
+            .is_some_and(|(scope, pkg)| is_pkg_name_segment(scope) && is_pkg_name_segment(pkg))
+    } else {
+        is_pkg_name_segment(name)
+    };
+    valid_name.then_some((name, version))
 }
 
 #[cfg(test)]
@@ -53,12 +198,9 @@ pub fn from_lock(lock: &Value, npmrc: &BTreeMap<String, String>) -> Result<Plan>
         }
     };
     let patched_dependencies = section("patchedDependencies")?;
-    let identity = Regex::new(r"^((?:@[a-z0-9._-]+/)?[a-z0-9._-]+)@(.+)$")?;
-    let safe_filename = Regex::new(r"[^a-zA-Z0-9._+-]")?;
     let mut packages = Vec::new();
     for (id, package) in section("packages")? {
-        let captures = identity
-            .captures(id)
+        let (name, version) = split_package_identity(id)
             .with_context(|| format!("unsupported package identity: {id}"))?;
         let resolution = package["resolution"]
             .as_object()
@@ -81,11 +223,9 @@ pub fn from_lock(lock: &Value, npmrc: &BTreeMap<String, String>) -> Result<Plan>
             _ => bail!("{id}: expected SHA-256/384/512 SRI hash"),
         };
         ensure!(
-            STANDARD.decode(digest)?.len() == size,
+            base64_decode(digest)?.len() == size,
             "{id}: invalid SRI digest length"
         );
-        let name = &captures[1];
-        let version = &captures[2];
         let registry = crate::config::registry(name, npmrc)?;
         let address = if let Some(tarball) = resolution.get("tarball").and_then(Value::as_str) {
             crate::config::url(&registry)?.join(tarball)?.to_string()
@@ -100,13 +240,22 @@ pub fn from_lock(lock: &Value, npmrc: &BTreeMap<String, String>) -> Result<Plan>
             )
         };
         let address = crate::config::url(&address)?;
-        let digest = format!("{:x}", Sha256::digest(id.as_bytes()));
+        let digest = hex_encode(&Sha256::digest(id.as_bytes()));
         let filename = address
             .path_segments()
             .and_then(|mut s| s.next_back())
             .filter(|s| !s.is_empty())
             .unwrap_or("package.tgz");
-        let filename = safe_filename.replace_all(filename, "-");
+        let filename: String = filename
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-') {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect();
         packages.push(Package {
             path: format!("/drvjs/{digest}"),
             name: format!("drvjs-{filename}"),
@@ -164,7 +313,7 @@ pub fn from_lock(lock: &Value, npmrc: &BTreeMap<String, String>) -> Result<Plan>
 mod tests {
     use super::*;
     fn fixture() -> Value {
-        serde_json::json!({"lockfileVersion": "9.0", "importers": {".": {}}, "packages": {"@scope/example@1.2.3": {"resolution": {"integrity": format!("sha512-{}", STANDARD.encode([0;64]))}}}})
+        serde_json::json!({"lockfileVersion": "9.0", "importers": {".": {}}, "packages": {"@scope/example@1.2.3": {"resolution": {"integrity": format!("sha512-{}", crate::hash::base64_encode(&[0;64]))}}}})
     }
     #[test]
     fn scoped_url() {

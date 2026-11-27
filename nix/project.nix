@@ -1,6 +1,7 @@
-{ pkgs, drvjs, dynamic, readSource ? null, nixpkgsSource ? drvjs.nixpkgsSource }:
+{ pkgs, drvjs ? null, unwrapped ? drvjs.unwrapped, readSource ? null, gitMinimal ? pkgs.gitMinimal }:
 let
   inherit (pkgs) lib;
+  system = pkgs.stdenv.hostPlatform.system;
   ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
   workspace = src: import ./workspace.nix { inherit lib src readSource; };
   mkJsPackage = args@{
@@ -12,35 +13,46 @@ let
       aliases = project.config.commands or {};
       selectors = map (s: aliases.${s} or s) (lib.optional (target != null) target ++ filters);
       selection = project.select selectors;
-      options = { inherit cachePackages cacheDependencies sharedDependencies keepVerificationStore zstdArchives; };
+      options = { inherit cachePackages cacheDependencies sharedDependencies keepVerificationStore zstdArchives dependenciesOnly; };
       # Only the graph output feeds dependency planning. Its CA path is stable
       # when application code changes, including on a fresh CI worker.
       projection = builtins.derivation (ca // {
         name = "drvjs-project";
-        inherit (drvjs.unwrapped) system;
+        inherit system;
         outputs = [ "out" "graph" ];
-        builder = "${drvjs.unwrapped}/bin/drvjs";
+        builder = "${unwrapped}/bin/drvjs";
         args = [ "project-inputs" "-C" selection.src "--sources" (builtins.placeholder "out")
           "--graph" (builtins.placeholder "graph") ]
           ++ lib.concatMap (s: [ "--filter" s ]) selectors;
       });
-      sourceExpression = if dependenciesOnly then
-        ''(builtins.storePath "${projection.graph}") + "/project"''
-        else ''builtins.storePath "${projection.out}"'';
-      build = dynamic {
+      planner = builtins.derivation ({
+        name = "drvjs-installation-plan.drv";
+        inherit system;
+        builder = "${unwrapped}/bin/drvjs";
+        args = [ "internal-plan" ];
+        __contentAddressed = true;
+        outputHashMode = "text";
+        outputHashAlgo = "sha256";
+        requiredSystemFeatures = [ "recursive-nix" ];
+        preferLocalBuild = true;
+        allowSubstitutes = true;
+        drvjsOut = unwrapped;
+        graphDir = projection.graph;
+        projectDir = if dependenciesOnly then "${projection.graph}/project" else projection.out;
+        optionsJson = builtins.toJSON options;
+      } // lib.optionalAttrs selection.hasPatches {
+        gitMinimalOut = gitMinimal;
+      });
+      build = builtins.derivation (ca // {
         name = "drvjs-installation";
-        expression = ''
-          let pkgs = import ${nixpkgsSource} { system = "${pkgs.stdenv.hostPlatform.system}"; };
-              graph = import ${projection.graph}/default.nix ((builtins.fromJSON ${builtins.toJSON (builtins.toJSON options)}) // {
-            inherit pkgs;
-            drvjs.unwrapped = {
-              outPath = builtins.storePath "${drvjs.unwrapped}";
-              system = "${pkgs.stdenv.hostPlatform.system}";
-            };
-            project = ${sourceExpression};
-          });
-          in ${if dependenciesOnly then "graph.dependencies" else "graph"}
-        '';
+        inherit system;
+        preferLocalBuild = true;
+        allowSubstitutes = true;
+        builder = "${unwrapped}/bin/drvjs";
+        args = [ "internal-symlink" (builtins.outputOf planner.outPath "out") (builtins.placeholder "out") ];
+      }) // {
+        inherit planner;
+        passthru = { inherit planner; };
       };
     in build // {
       inherit (selection) primary;

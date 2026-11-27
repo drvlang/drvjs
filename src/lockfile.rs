@@ -1,7 +1,78 @@
 //! Read pnpm's project graph into the snapshot layout used by the native installer.
 use anyhow::{Context, Result, bail, ensure};
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, DeserializeOwned, MapAccess, Visitor},
+};
 use serde_json::{Value, json};
+use std::borrow::Cow;
+
+const YAML_DOCUMENT_SEPARATOR: &str = "\n---\n";
+const YAML_DOCUMENT_START: &str = "---\n";
+const ROOT_IMPORTER_CONFIG_DEPENDENCIES: &str = "\n  .:\n    configDependencies:";
+const ROOT_IMPORTER_CONFIG_DEPENDENCIES_JSON: &str =
+    "\n\t\t\".\": {\n\t\t\t\"configDependencies\":";
+
+fn normalize_lockfile_content(content: &str) -> Cow<'_, str> {
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
+    if content.contains("\r\n") {
+        Cow::Owned(content.replace("\r\n", "\n"))
+    } else {
+        Cow::Borrowed(content)
+    }
+}
+
+fn env_only_document(rest: &str) -> Option<&str> {
+    let document = rest
+        .strip_suffix("\n---")
+        .or_else(|| rest.strip_suffix('\n'))
+        .unwrap_or(rest);
+    (document.contains(ROOT_IMPORTER_CONFIG_DEPENDENCIES)
+        || document.contains(ROOT_IMPORTER_CONFIG_DEPENDENCIES_JSON))
+    .then_some(document)
+}
+
+fn extract_main_document(content: &str) -> Cow<'_, str> {
+    match normalize_lockfile_content(content) {
+        Cow::Borrowed(c) => {
+            let Some(rest) = c.strip_prefix(YAML_DOCUMENT_START) else {
+                return Cow::Borrowed(c);
+            };
+            match rest.find(YAML_DOCUMENT_SEPARATOR) {
+                Some(idx) => Cow::Borrowed(&rest[idx + YAML_DOCUMENT_SEPARATOR.len()..]),
+                None => Cow::Borrowed(""),
+            }
+        }
+        Cow::Owned(c) => {
+            let Some(rest) = c.strip_prefix(YAML_DOCUMENT_START) else {
+                return Cow::Owned(c);
+            };
+            match rest.find(YAML_DOCUMENT_SEPARATOR) {
+                Some(idx) => Cow::Owned(rest[idx + YAML_DOCUMENT_SEPARATOR.len()..].to_owned()),
+                None => Cow::Borrowed(""),
+            }
+        }
+    }
+}
+
+fn extract_env_document(content: &str) -> Option<Cow<'_, str>> {
+    match normalize_lockfile_content(content) {
+        Cow::Borrowed(c) => {
+            let rest = c.strip_prefix(YAML_DOCUMENT_START)?;
+            match rest.find(YAML_DOCUMENT_SEPARATOR) {
+                Some(idx) => Some(Cow::Borrowed(&rest[..idx])),
+                None => env_only_document(rest).map(Cow::Borrowed),
+            }
+        }
+        Cow::Owned(c) => {
+            let rest = c.strip_prefix(YAML_DOCUMENT_START)?;
+            match rest.find(YAML_DOCUMENT_SEPARATOR) {
+                Some(idx) => Some(Cow::Owned(rest[..idx].to_owned())),
+                None => env_only_document(rest).map(|d| Cow::Owned(d.to_owned())),
+            }
+        }
+    }
+}
 
 fn version(doc: &Value) -> Result<String> {
     let version = match &doc["lockfileVersion"] {
@@ -38,15 +109,53 @@ pub struct ProjectLock {
     pub original_bytes: bool,
 }
 
-// Workspace discovery only needs these sections. Serde skips packages and
-// snapshots entirely, including v13 peer bindings.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+// Workspace discovery only needs these sections. Manual Deserialize skips
+// packages and snapshots entirely without pulling in serde_derive/syn.
 struct WorkspaceSections {
     lockfile_version: Value,
     importers: Option<Value>,
     projects: Option<Value>,
     settings: Option<Value>,
+}
+
+impl<'de> Deserialize<'de> for WorkspaceSections {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        struct SectionsVisitor;
+        impl<'de> Visitor<'de> for SectionsVisitor {
+            type Value = WorkspaceSections;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a pnpm lockfile mapping")
+            }
+            fn visit_map<M: MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> std::result::Result<WorkspaceSections, M::Error> {
+                let mut lockfile_version = None;
+                let mut importers = None;
+                let mut projects = None;
+                let mut settings = None;
+                while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+                    match key.as_ref() {
+                        "lockfileVersion" => lockfile_version = Some(map.next_value()?),
+                        "importers" => importers = Some(map.next_value()?),
+                        "projects" => projects = Some(map.next_value()?),
+                        "settings" => settings = Some(map.next_value()?),
+                        _ => {
+                            let _ = map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(WorkspaceSections {
+                    lockfile_version: lockfile_version
+                        .ok_or_else(|| de::Error::missing_field("lockfileVersion"))?,
+                    importers,
+                    projects,
+                    settings,
+                })
+            }
+        }
+        deserializer.deserialize_map(SectionsVisitor)
+    }
 }
 
 impl WorkspaceSections {
@@ -100,11 +209,11 @@ fn pnpm_json(input: &str) -> Vec<u8> {
 fn documents<T: DeserializeOwned>(input: &str) -> Result<(T, Option<T>)> {
     // pnpm writes v13 as JSON with trailing commas, optionally after a YAML boot
     // document. Keep the YAML stream reader for other legal YAML encodings.
-    let main = pnpm_lockfile::extract_main_document(input);
+    let main = extract_main_document(input);
     if main.trim_start().starts_with('{')
         && let Ok(doc) = serde_json::from_slice(&pnpm_json(&main))
     {
-        if let Some(boot) = pnpm_lockfile::extract_env_document(input) {
+        if let Some(boot) = extract_env_document(input) {
             return Ok((serde_yaml_ng::from_str(&boot)?, Some(doc)));
         }
         return Ok((doc, None));
@@ -182,12 +291,8 @@ pub fn parse(input: &str) -> Result<ProjectLock> {
             "format 13.0 project lockfile has no projects"
         );
         graph["lockfileVersion"] = json!("13.0");
-        let next =
-            serde_json::from_value(graph).context("reading pnpm format 13.0 project graph")?;
-        graph = serde_json::to_value(
-            pnpm_lockfile::Lockfile::from_next(next)
-                .context("restoring pnpm format 13.0 snapshots")?,
-        )?;
+        graph = crate::lockfile_v13::from_next(graph)
+            .context("restoring pnpm format 13.0 snapshots")?;
     }
     graph["lockfileVersion"] = json!("9.0");
     Ok(ProjectLock {

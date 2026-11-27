@@ -6,13 +6,16 @@
     let
       inherit (nixpkgs) lib;
       eachSystem = lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
-      packageSets = eachSystem (system: import nixpkgs { inherit system; });
+      packageSets = eachSystem (system: nixpkgs.legacyPackages.${system});
+      builtPackages = eachSystem (system: import ./nix/package.nix {
+        pkgs = packageSets.${system};
+        nixpkgsSource = nixpkgs.outPath;
+      });
       projects = eachSystem (system: import ./nix/project.nix {
         readSource = import (drvkit + "/source-reader.nix") lib;
         pkgs = packageSets.${system};
-        nixpkgsSource = nixpkgs.outPath;
-        dynamic = import (drvkit + "/dynamic.nix") { pkgs = packageSets.${system}; };
         drvjs = self.packages.${system}.drvjs;
+        unwrapped = builtPackages.${system}.unwrapped;
       });
       commandFlake = perSystem: script: rec {
         packages = eachSystem (system: builtins.mapAttrs (_: projects.${system}.mkJsPackage) (perSystem system));
@@ -21,11 +24,7 @@
       };
     in {
       packages = eachSystem (system: rec {
-        drvjs = import ./nix/package.nix {
-          pkgs = packageSets.${system};
-          nixpkgsSource = nixpkgs.outPath;
-          dynamicFile = drvkit + "/dynamic.nix";
-        };
+        drvjs = builtPackages.${system};
         default = drvjs;
         bench = import ./benchmarks/package.nix { pkgs = packageSets.${system}; };
       });
@@ -37,7 +36,10 @@
         };
         default = drvjs;
       });
-      checks = eachSystem (system: { inherit (self.packages.${system}) drvjs bench; });
+      checks = eachSystem (system: {
+        inherit (self.packages.${system}) drvjs bench;
+        drvjs-tests = builtPackages.${system}.tests;
+      });
 
       lib.projectSource = import (drvkit + "/project-source.nix") nixpkgs.lib;
       lib.mkPackage = self.lib.mkJsPackage;

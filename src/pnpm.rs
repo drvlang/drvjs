@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::{fs, path::Path, process::Command, time::Instant};
 
 fn run(cwd: &Path, args: &[&str]) -> Result<()> {
-    let home = tempfile::tempdir()?;
+    let home = crate::temp::tempdir()?;
     let started = Instant::now();
     let status = Command::new("pnpm")
         .args(args)
@@ -53,7 +53,7 @@ pub fn install(root: &Path) -> Result<()> {
 pub fn store_status(root: &Path) -> Result<()> {
     let lock = fs::read_to_string(root.join("pnpm-lock.yaml"))?;
     let mut data: Value = serde_yaml_ng::from_str(&lock)?;
-    let tmp = tempfile::tempdir()?;
+    let tmp = crate::temp::tempdir()?;
     crate::workspace::copy_support(root, tmp.path(), &data)?;
     if let Some(snapshots) = data["snapshots"].as_object_mut() {
         snapshots.retain(|id, _| !id.contains("(patch_hash="));

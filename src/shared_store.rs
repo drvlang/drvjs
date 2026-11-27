@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn separates_registry_aliases_from_workspace_hoists_and_relocates_bins() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = crate::temp::tempdir().unwrap();
         let layer = tmp.path().join("layer");
         let graph = tmp.path().join("graph");
         let package = layer.join(VIRTUAL).join("example@1/node_modules/example");
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn rejects_source_bound_registry_links_before_moving_packages() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = crate::temp::tempdir().unwrap();
         let layer = tmp.path().join("layer");
         let graph = tmp.path().join("graph");
         let package = layer.join(VIRTUAL).join("example@1/node_modules");
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn expansion_rejects_redirected_instance_roots() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = crate::temp::tempdir().unwrap();
         let graph = tmp.path().join("graph");
         let path = tmp.path().join("link");
         symlink(tmp.path(), &path).unwrap();

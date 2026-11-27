@@ -31,7 +31,7 @@ pub fn patch(source: &Path, out: &Path, patch: &Path, hash: &str) -> Result<()> 
         let mode = entry.metadata()?.permissions().mode() | 0o200;
         fs::set_permissions(entry.path(), fs::Permissions::from_mode(mode))?;
     }
-    let scratch = tempfile::tempdir()?;
+    let scratch = crate::temp::tempdir()?;
     fs::copy(patch, scratch.path().join("package.patch"))?;
     store::patch(
         scratch.path(),
@@ -110,14 +110,16 @@ impl Contents {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{Engine, engine::general_purpose::STANDARD};
-    use sha2::{Digest, Sha256, Sha512};
+    use crate::{
+        compress,
+        hash::{Sha256, Sha512, base64_encode, hex_encode},
+    };
 
     #[test]
     fn cached_patch_tracks_added_removed_files_without_mutating_its_base() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::temp::tempdir().unwrap();
         let archive = root.path().join("package.tgz");
-        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        let encoder = compress::GzEncoder::new(Vec::new(), 1);
         let mut tar = tar::Builder::new(encoder);
         for (path, content) in [
             (
@@ -135,7 +137,7 @@ mod tests {
         }
         let bytes = tar.into_inner().unwrap().finish().unwrap();
         fs::write(&archive, &bytes).unwrap();
-        let integrity = format!("sha512-{}", STANDARD.encode(Sha512::digest(&bytes)));
+        let integrity = format!("sha512-{}", base64_encode(&Sha512::digest(&bytes)));
         let base = root.path().join("base");
         prepare(&archive, &base, "example@1.0.0", &integrity).unwrap();
         // Match the permissions of an immutable Nix input.
@@ -148,7 +150,7 @@ mod tests {
         let patch_text = "diff --git a/old.js b/old.js\n--- a/old.js\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\ndiff --git a/new.js b/new.js\n--- /dev/null\n+++ b/new.js\n@@ -0,0 +1 @@\n+new\n";
         let patch_file = root.path().join("edit.patch");
         fs::write(&patch_file, patch_text).unwrap();
-        let hash = format!("{:x}", Sha256::digest(patch_text));
+        let hash = hex_encode(&Sha256::digest(patch_text));
         let patched = root.path().join("patched");
         patch(&base, &patched, &patch_file, &hash).unwrap();
         let index = read_index(&patched).unwrap();

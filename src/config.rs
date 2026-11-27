@@ -1,13 +1,12 @@
 //! Configuration copied into an export must never contain authentication values.
-use anyhow::{Context, Result, ensure};
-use pnpm_lockfile::{PkgNameVerPeer, RegistryServerType, TarballUrlOptions, npm_tarball_url};
+use crate::{semver::Version, url::Url};
+use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::Path,
 };
-use url::Url;
 
 pub fn url(value: &str) -> Result<Url> {
     let parsed = download_url(value)?;
@@ -124,15 +123,67 @@ pub fn registry(name: &str, settings: &BTreeMap<String, String>) -> Result<Strin
     Ok(format!("{}/", value.trim_end_matches('/')))
 }
 
-// Project newer workspace registry declarations onto the explicit tarball URLs
-// and scope routes the frozen pnpm 10 installer can consume.
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct WorkspaceRegistry {
-    prefix: Option<String>,
-    #[serde(default)]
-    scopes: Vec<String>,
-    server_type: Option<RegistryServerType>,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RegistryServerType {
+    Npm,
+    Artifactory,
+    Pnpr,
+}
+
+fn parse_server_type(v: &Value) -> Result<RegistryServerType> {
+    match v.as_str() {
+        Some("npm") => Ok(RegistryServerType::Npm),
+        Some("artifactory") => Ok(RegistryServerType::Artifactory),
+        Some("pnpr") => Ok(RegistryServerType::Pnpr),
+        _ => bail!("invalid npm workspace registry serverType: {v}"),
+    }
+}
+
+fn npm_tarball_url(name: &str, version: &str, registry: &str, artifactory: bool) -> String {
+    let registry = if registry.ends_with('/') {
+        registry.to_owned()
+    } else {
+        format!("{registry}/")
+    };
+    let version = version.split_once('+').map(|(b, _)| b).unwrap_or(version);
+    let filename_name = if artifactory {
+        name
+    } else {
+        match name.strip_prefix('@') {
+            Some(scoped) => scoped.split_once('/').map(|(_, bare)| bare).unwrap_or(name),
+            None => name,
+        }
+    };
+    format!("{registry}{name}/-/{filename_name}-{version}.tgz")
+}
+
+fn split_registry_qualified(version: &str) -> Option<(&str, &str)> {
+    let (prefix, rest) = version.split_once(':')?;
+    if prefix.is_empty()
+        || !prefix
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        || matches!(
+            prefix,
+            "file"
+                | "link"
+                | "npm"
+                | "workspace"
+                | "http"
+                | "https"
+                | "git"
+                | "github"
+                | "gitlab"
+                | "bitbucket"
+                | "jsr"
+                | "catalog"
+                | "runtime"
+        )
+    {
+        return None;
+    }
+    Version::parse(rest).ok()?;
+    Some((prefix, rest))
 }
 
 struct RegistryRoutes {
@@ -151,8 +202,14 @@ fn registry_routes(
     let mut artifactory = BTreeSet::new();
     if let Some(settings) = config.and_then(Value::as_object_mut) {
         if let Some(named) = settings.remove("namedRegistries") {
-            for (prefix, address) in serde_json::from_value::<BTreeMap<String, String>>(named)? {
-                prefixes.insert(prefix, url(&address)?.to_string());
+            let map = named
+                .as_object()
+                .context("namedRegistries must be an object")?;
+            for (prefix, address) in map {
+                let address = address
+                    .as_str()
+                    .context("namedRegistries values must be strings")?;
+                prefixes.insert(prefix.clone(), url(address)?.to_string());
             }
         }
         if let Some(registries) = settings.remove("registries") {
@@ -164,19 +221,48 @@ fn registry_routes(
                     (url(address)?.to_string(), vec![key.clone()])
                 } else {
                     let address = url(key)?.to_string();
-                    let entry: WorkspaceRegistry = serde_json::from_value(entry.clone())
+                    let obj = entry
+                        .as_object()
                         .context("invalid npm workspace registry declaration")?;
+                    let mut prefix = None;
+                    let mut scopes = Vec::new();
+                    let mut server_type = None;
+                    for (field, val) in obj {
+                        match field.as_str() {
+                            "prefix" => {
+                                prefix = Some(
+                                    val.as_str()
+                                        .context("invalid registry prefix")?
+                                        .to_owned(),
+                                );
+                            }
+                            "scopes" => {
+                                let arr = val
+                                    .as_array()
+                                    .context("invalid registry scopes")?;
+                                for s in arr {
+                                    scopes.push(
+                                        s.as_str()
+                                            .context("invalid registry scope")?
+                                            .to_owned(),
+                                    );
+                                }
+                            }
+                            "serverType" => server_type = Some(parse_server_type(val)?),
+                            other => bail!("invalid npm workspace registry declaration: unknown field {other}"),
+                        }
+                    }
                     ensure!(
-                        entry.server_type != Some(RegistryServerType::Pnpr),
+                        server_type != Some(RegistryServerType::Pnpr),
                         "pnpr registry revisions and tar archives are unsupported"
                     );
-                    if let Some(prefix) = entry.prefix {
+                    if let Some(prefix) = prefix {
                         prefixes.insert(prefix, address.clone());
                     }
-                    if entry.server_type == Some(RegistryServerType::Artifactory) {
+                    if server_type == Some(RegistryServerType::Artifactory) {
                         artifactory.insert(address.trim_end_matches('/').to_owned());
                     }
-                    (address, entry.scopes)
+                    (address, scopes)
                 };
                 for scope in scopes {
                     let key = if scope == "default" || scope == "@" {
@@ -225,12 +311,11 @@ pub fn project_registries(
             resolution.get("variants").is_none(),
             "{id}: registry platform variants are unsupported"
         );
-        let key: PkgNameVerPeer = id
-            .parse()
+        let (name, suffix) = crate::lockfile_v13::split_pkg_key(id)
             .with_context(|| format!("invalid package identity: {id}"))?;
-        let name = key.name.to_string();
-        let prefix_version = key.suffix.registry_qualified();
-        let registry = if let Some((prefix, _)) = prefix_version {
+        let version_part = suffix.split('(').next().unwrap_or(suffix);
+        let prefix_version = split_registry_qualified(version_part);
+        let reg = if let Some((prefix, _)) = prefix_version {
             if resolution
                 .get("tarball")
                 .and_then(Value::as_str)
@@ -244,31 +329,26 @@ pub fn project_registries(
                 .with_context(|| format!("{id}: unknown registry prefix {prefix}"))?
                 .clone()
         } else {
-            registry(&name, npmrc)?
+            registry(name, npmrc)?
         };
-        let server_type = routes
-            .artifactory
-            .contains(registry.trim_end_matches('/'))
-            .then_some(RegistryServerType::Artifactory);
-        if prefix_version.is_none() && server_type.is_none() {
+        let is_artifactory = routes.artifactory.contains(reg.trim_end_matches('/'));
+        if prefix_version.is_none() && !is_artifactory {
             continue;
         }
         let address = if let Some(tarball) = resolution.get("tarball").and_then(Value::as_str) {
-            url(&format!("{}/", registry.trim_end_matches('/')))?
+            url(&format!("{}/", reg.trim_end_matches('/')))?
                 .join(tarball)?
                 .to_string()
         } else {
-            let version = key.suffix.registry_version().with_context(|| {
-                format!("{id}: expected a registry version or explicit tarball URL")
-            })?;
-            npm_tarball_url(
-                &name,
-                &version.to_string(),
-                TarballUrlOptions {
-                    registry: &registry,
-                    server_type,
-                },
-            )
+            let ver = if let Some((_, v)) = prefix_version {
+                v
+            } else {
+                Version::parse(version_part).with_context(|| {
+                    format!("{id}: expected a registry version or explicit tarball URL")
+                })?;
+                version_part
+            };
+            npm_tarball_url(name, ver, &reg, is_artifactory)
         };
         resolution.insert("tarball".into(), url(&address)?.to_string().into());
         changed = true;
@@ -361,7 +441,7 @@ mod tests {
     }
     #[test]
     fn scopes_and_credentials() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::temp::tempdir().unwrap();
         fs::write(root.path().join(".npmrc"), "@private:registry=https://example.org/npm/\n//example.org/npm/:_authToken=TOPSECRET\nengine-strict=true\n").unwrap();
         let rc = npmrc(root.path()).unwrap();
         assert!(!format!("{rc:?}").contains("TOPSECRET"));

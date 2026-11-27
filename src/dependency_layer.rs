@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn installation_copy_keeps_file_and_symlink_roots() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::temp::tempdir().unwrap();
         let source = root.path().join("source");
         let target = root.path().join("target");
         fs::create_dir(&source).unwrap();
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn empty_installation_keeps_the_absence_of_package_metadata() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::temp::tempdir().unwrap();
         let source = root.path().join("source");
         fs::create_dir(&source).unwrap();
         store::write_json(&source.join("package.json"), &json!({"name":"empty"})).unwrap();
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn generated_bins_do_not_become_source_inputs_after_installation() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::temp::tempdir().unwrap();
         store::write_json(
             &root.path().join("package.json"),
             &json!({
@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn materializing_a_failed_copy_leaves_the_destination_available_for_retry() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = crate::temp::tempdir().unwrap();
         let source = tmp.path().join("project");
         let layer = tmp.path().join("layer");
         let out = tmp.path().join("work");

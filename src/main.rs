@@ -1,186 +1,139 @@
+mod cli;
 mod commands;
+mod compress;
 mod config;
 mod dependency_layer;
+mod direct_plan;
 mod fetch;
+mod hash;
 mod lockfile;
+mod lockfile_v13;
 mod native;
 mod native_store;
+mod nixstore;
 mod package_cache;
 mod plan;
 mod pnpm;
+mod semver;
 mod shared_store;
+mod temp;
+mod url;
 mod verify;
 mod workspace;
 
 use anyhow::{Context, Result, ensure};
-use clap::{Args, Parser, Subcommand};
 use commands::{Execution, Project};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-#[derive(Parser)]
-#[command(
-    version,
-    about = "Build pnpm node_modules with package-granular Nix fetches"
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Build a project with its locked node_modules tree.
+pub(crate) enum Commands {
     Build {
-        #[command(flatten)]
         project: Project,
-        /// Nix output symlink (relative to the project).
-        #[arg(short, long, alias = "out-link", conflicts_with = "no_link")]
         out: Option<PathBuf>,
-        /// Print the store path without creating an output symlink.
-        #[arg(long)]
         no_link: bool,
     },
-    /// Run the start script in a writable copy of the built project.
     Run {
-        #[command(flatten)]
         execution: Execution,
-        /// Package script to run.
-        #[arg(long, default_value = "start")]
         script: String,
     },
-    /// Run the test script in a writable copy of the built project.
     Test(Execution),
-    /// Write a standalone Nix build (defaults to .drvjs in the project).
     Export {
-        #[command(flatten)]
         project: Project,
-        #[arg(short, long)]
         out: Option<PathBuf>,
-        /// Include application sources for a single-package project.
-        #[arg(long)]
         include_sources: bool,
-        #[arg(long, hide = true)]
         plan_only: bool,
     },
-    /// Project application sources and dependency planning inputs into separate CA outputs.
-    #[command(hide = true)]
     ProjectInputs {
-        #[command(flatten)]
         project: Project,
-        #[arg(long)]
         sources: PathBuf,
-        #[arg(long)]
         graph: PathBuf,
     },
-    #[command(hide = true)]
     WorkspaceInfo {
         directory: PathBuf,
-        #[arg(long)]
         list: bool,
         filters: Vec<String>,
     },
-    #[command(hide = true)]
     RunScript {
         installation: PathBuf,
-        #[arg(long)]
         project: Option<PathBuf>,
         importer: PathBuf,
         script: String,
-        #[arg(last = true)]
         args: Vec<std::ffi::OsString>,
     },
-    /// Import authenticated tarballs into Nix without storing credentials.
     Fetch {
         directory: PathBuf,
-        #[arg(long)]
         npmrc: Option<PathBuf>,
-        /// Fetch public tarballs too (default: custom/private registries only).
-        #[arg(long)]
         all: bool,
-        /// Target Nix system to prefetch (defaults to the current host).
-        #[arg(long, conflicts_with = "all_platforms")]
         system: Option<String>,
-        /// Prefetch every platform in the exported lockfile.
-        #[arg(long)]
         all_platforms: bool,
     },
-    /// Compare node_modules with pnpm's fresh offline reconstruction.
     Verify {
         directory: PathBuf,
-        /// Use a compatible external pnpm v10 store; the original store is never modified.
-        #[arg(long)]
         store: Option<PathBuf>,
     },
-    /// Copy an installation or cached dependency layer into a standalone, writable workspace.
     Materialize {
         directory: PathBuf,
-        /// Use the current export's project/ directory with a matching dependencies layer.
-        #[arg(long)]
         project: Option<PathBuf>,
-        #[arg(short, long)]
         out: PathBuf,
     },
-    /// Internal Nix builder entry point.
-    #[command(hide = true)]
     Assemble {
         source: PathBuf,
         out: PathBuf,
         tarballs: PathBuf,
-        #[arg(long)]
         keep_verification_store: bool,
-        /// Experimental: seed installation from a compatible retained pnpm store.
-        #[arg(long)]
         unpacked_store: Option<PathBuf>,
-        /// Internal manifest of immutable, Nix-built package contents.
-        #[arg(long)]
         package_contents: Option<PathBuf>,
-        /// Internal second Nix output for a shared registry graph.
-        #[arg(long)]
         shared_packages: Option<PathBuf>,
     },
-    #[command(hide = true)]
     PreparePackage {
         archive: PathBuf,
         out: PathBuf,
         id: String,
         integrity: String,
     },
-    #[command(hide = true)]
     PatchPackage {
         source: PathBuf,
         out: PathBuf,
         patch: PathBuf,
         hash: String,
     },
-    #[command(hide = true)]
     Attach {
         source: PathBuf,
         layer: PathBuf,
         out: PathBuf,
     },
+    InternalPlan,
+    InternalSymlink {
+        target: PathBuf,
+        out: PathBuf,
+    },
+    PrepareZstd {
+        archive: PathBuf,
+        out: PathBuf,
+    },
 }
 
-#[derive(Args, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BuildOptions {
-    /// Retain pnpm's package store for later offline `drvjs verify`.
-    #[arg(long)]
-    keep_verification_store: bool,
-    /// Cache zstd-normalized archives in Nix (experimental).
-    #[arg(long)]
-    zstd_archives: bool,
-    /// Cache extracted packages independently for repeated CI builds.
-    #[arg(long)]
-    cache_packages: bool,
-    /// Cache the installed dependency tree across workspace source edits.
-    #[arg(long)]
-    cache_dependencies: bool,
-    /// Share immutable registry packages between outputs (changes physical module paths).
-    #[arg(long)]
-    shared_dependencies: bool,
+#[derive(Default)]
+pub(crate) struct BuildOptions {
+    pub keep_verification_store: bool,
+    pub zstd_archives: bool,
+    pub cache_packages: bool,
+    pub cache_dependencies: bool,
+    pub shared_dependencies: bool,
+}
+
+impl BuildOptions {
+    pub fn to_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "keepVerificationStore": self.keep_verification_store,
+            "zstdArchives": self.zstd_archives,
+            "cachePackages": self.cache_packages,
+            "cacheDependencies": self.cache_dependencies,
+            "sharedDependencies": self.shared_dependencies,
+        })
+    }
 }
 
 struct Exported {
@@ -208,7 +161,7 @@ fn export(
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
-    let stage = tempfile::tempdir_in(parent)?;
+    let stage = temp::tempdir_in(parent)?;
     let projected = stage.path().join("project");
     let written = write_export(
         args,
@@ -248,15 +201,12 @@ fn write_export(
     let mut filters = args.selectors();
     let aliases = project.join("drvlang.json");
     if aliases.is_file() {
-        #[derive(serde::Deserialize)]
-        struct Config {
-            #[serde(default)]
-            commands: std::collections::BTreeMap<String, String>,
-        }
-        let config: Config = serde_json::from_slice(&fs::read(aliases)?)?;
-        for selector in &mut filters {
-            if let Some(path) = config.commands.get(selector) {
-                selector.clone_from(path);
+        let config: serde_json::Value = serde_json::from_slice(&fs::read(aliases)?)?;
+        if let Some(commands) = config.get("commands").and_then(serde_json::Value::as_object) {
+            for selector in &mut filters {
+                if let Some(path) = commands.get(selector).and_then(serde_json::Value::as_str) {
+                    *selector = path.to_owned();
+                }
             }
         }
     }
@@ -285,10 +235,13 @@ fn write_export(
     )?;
     plan.target_packages = native::target_packages(projected, &selection.lock)?;
     plan.dependency_files = dependency_layer::files_for_lock(projected, &selection.lock)?;
-    fs::write(graph.join("plan.json"), serde_json::to_vec_pretty(&plan)?)?;
+    fs::write(
+        graph.join("plan.json"),
+        serde_json::to_vec_pretty(&plan.to_value())?,
+    )?;
     fs::write(
         graph.join("options.json"),
-        serde_json::to_vec_pretty(&args.options)?,
+        serde_json::to_vec_pretty(&args.options.to_value())?,
     )?;
     fs::write(graph.join("default.nix"), include_str!("../nix/build.nix"))?;
     if standalone {
@@ -297,22 +250,31 @@ fn write_export(
         for (name, content) in [
             ("Cargo.toml", include_str!("../Cargo.toml")),
             ("Cargo.lock", include_str!("../Cargo.lock")),
+            ("src/cli.rs", include_str!("cli.rs")),
             ("src/main.rs", include_str!("main.rs")),
             ("src/commands.rs", include_str!("commands.rs")),
+            ("src/compress.rs", include_str!("compress.rs")),
             ("src/config.rs", include_str!("config.rs")),
             (
                 "src/dependency_layer.rs",
                 include_str!("dependency_layer.rs"),
             ),
+            ("src/direct_plan.rs", include_str!("direct_plan.rs")),
             ("src/fetch.rs", include_str!("fetch.rs")),
+            ("src/hash.rs", include_str!("hash.rs")),
             ("src/lockfile.rs", include_str!("lockfile.rs")),
+            ("src/lockfile_v13.rs", include_str!("lockfile_v13.rs")),
+            ("src/nixstore.rs", include_str!("nixstore.rs")),
             ("src/plan.rs", include_str!("plan.rs")),
             ("src/pnpm.rs", include_str!("pnpm.rs")),
+            ("src/semver.rs", include_str!("semver.rs")),
             ("src/shared_store.rs", include_str!("shared_store.rs")),
+            ("src/temp.rs", include_str!("temp.rs")),
             ("src/native.rs", include_str!("native.rs")),
             ("src/native_store.rs", include_str!("native_store.rs")),
             ("src/package_cache.rs", include_str!("package_cache.rs")),
             ("src/native_shim.txt", include_str!("native_shim.txt")),
+            ("src/url.rs", include_str!("url.rs")),
             ("src/verify.rs", include_str!("verify.rs")),
             ("src/workspace.rs", include_str!("workspace.rs")),
             ("nix/build.nix", include_str!("../nix/build.nix")),
@@ -330,7 +292,14 @@ fn write_export(
 }
 
 fn main() {
-    let result = match Cli::parse().command {
+    let command = match cli::parse() {
+        Ok(cmd) => cmd,
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            std::process::exit(2);
+        }
+    };
+    let result = match command {
         Commands::Build {
             project,
             out,
@@ -443,6 +412,9 @@ fn main() {
             hash,
         } => package_cache::patch(&source, &out, &patch, &hash),
         Commands::Attach { source, layer, out } => dependency_layer::attach(&source, &layer, &out),
+        Commands::InternalPlan => direct_plan::internal_plan(),
+        Commands::InternalSymlink { target, out } => direct_plan::internal_symlink(&target, &out),
+        Commands::PrepareZstd { archive, out } => direct_plan::prepare_zstd(&archive, &out),
     };
     if let Err(error) = result.context("drvjs failed") {
         eprintln!("{error:#}");

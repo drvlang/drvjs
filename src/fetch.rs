@@ -1,8 +1,11 @@
 //! Authenticated downloads happen on the host; only verified bytes enter Nix.
-use crate::{config, plan::Plan};
+use crate::{
+    config,
+    hash::{Sha256, Sha384, Sha512, base64_encode},
+    plan::Plan,
+    temp,
+};
 use anyhow::{Context, Result, bail, ensure};
-use base64::{Engine, engine::general_purpose::STANDARD};
-use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -126,7 +129,7 @@ pub fn hash_file(path: &Path, algorithm: &str) -> Result<String> {
                 }
                 hash.update(&buffer[..n]);
             }
-            STANDARD.encode(hash.finalize())
+            base64_encode(&hash.finalize())
         }};
     }
     let digest = match algorithm {
@@ -146,7 +149,7 @@ pub fn complete_integrities(lock: &mut serde_json::Value, npmrc: Option<&Path>) 
                 let address = package["resolution"]["tarball"]
                     .as_str()
                     .context("resolution needs an integrity hash or HTTPS tarball")?;
-                let tmp = tempfile::tempdir()?;
+                let tmp = temp::tempdir()?;
                 let file = tmp.path().join("package.tgz");
                 download(address, &file, npmrc)?;
                 package["resolution"]["integrity"] = hash_file(&file, "sha512")?.into();
@@ -164,7 +167,9 @@ pub fn fetch(
     system: Option<&str>,
     all_platforms: bool,
 ) -> Result<()> {
-    let plan: Plan = serde_json::from_slice(&fs::read(export.join("plan.json"))?)?;
+    let plan = Plan::from_value(&serde_json::from_slice(&fs::read(
+        export.join("plan.json"),
+    )?)?)?;
     let current = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
     let system = system.unwrap_or(&current);
     let active = if all_platforms || plan.target_packages.is_empty() {
@@ -184,8 +189,11 @@ pub fn fetch(
         println!("Imported 0 verified tarballs into Nix");
         return Ok(());
     }
-    let mut input = tempfile::NamedTempFile::new()?;
-    serde_json::to_writer(&mut input, &packages)?;
+    let mut input = temp::NamedTempFile::new()?;
+    let packages_json = serde_json::Value::Array(
+        packages.iter().map(crate::plan::Package::to_value).collect(),
+    );
+    serde_json::to_writer(&mut input, &packages_json)?;
     let expected = Command::new("nix-instantiate")
         .args([
             "--eval", "--strict", "--json", "--expr",
@@ -203,7 +211,7 @@ pub fn fetch(
         paths.len() == packages.len(),
         "incomplete Nix fixed-output store paths"
     );
-    let mut query = tempfile::NamedTempFile::new()?;
+    let mut query = temp::NamedTempFile::new()?;
     for path in &paths {
         writeln!(query, "{path}")?;
     }
@@ -225,7 +233,7 @@ pub fn fetch(
         .collect();
     crate::native_store::parallel_each(&missing, |(package, path)| {
         let algorithm = package.hash.split_once('-').context("invalid SRI")?.0;
-        let tmp = tempfile::tempdir()?;
+        let tmp = temp::tempdir()?;
         let file = tmp.path().join(&package.name);
         download(&package.url, &file, npmrc).with_context(|| format!("fetching {}", package.id))?;
         ensure!(

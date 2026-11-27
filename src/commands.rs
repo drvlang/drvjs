@@ -1,6 +1,5 @@
 use crate::{BuildOptions, dependency_layer, export, native_store, workspace};
 use anyhow::{Context, Result, ensure};
-use clap::Args;
 use serde_json::{Value, json};
 use std::{
     ffi::OsString,
@@ -10,20 +9,11 @@ use std::{
     process::{Command, Stdio},
 };
 
-#[derive(Args)]
 pub(crate) struct Project {
-    /// Project or workspace root containing pnpm-lock.yaml.
-    #[arg(short = 'C', long, default_value = ".")]
     pub directory: PathBuf,
-    /// Exact workspace name or root-relative path (defaults to the whole project).
-    package: Option<String>,
-    /// Include another workspace package and its dependencies. Repeat for a union.
-    #[arg(long = "filter")]
-    filters: Vec<String>,
-    /// Host-only npm credentials for registry tarballs.
-    #[arg(long)]
+    pub package: Option<String>,
+    pub filters: Vec<String>,
     pub npmrc: Option<PathBuf>,
-    #[command(flatten)]
     pub options: BuildOptions,
 }
 
@@ -33,13 +23,9 @@ impl Project {
     }
 }
 
-#[derive(Args)]
 pub(crate) struct Execution {
-    #[command(flatten)]
-    project: Project,
-    /// Arguments passed to the package script after --.
-    #[arg(last = true)]
-    args: Vec<OsString>,
+    pub project: Project,
+    pub args: Vec<OsString>,
 }
 
 #[derive(Debug)]
@@ -82,7 +68,7 @@ fn realize(project: &Project, graph: &Path, link: Option<&Path>, quiet: bool) ->
     } else {
         let local = Path::new(env!("CARGO_MANIFEST_DIR"));
         let flake = if local.join("flake.nix").is_file() {
-            let url = url::Url::from_file_path(local)
+            let url = crate::url::Url::from_file_path(local)
                 .map_err(|_| anyhow::anyhow!("invalid checkout path: {}", local.display()))?;
             format!("git+{url}?shallow=1")
         } else {
@@ -90,7 +76,7 @@ fn realize(project: &Project, graph: &Path, link: Option<&Path>, quiet: bool) ->
         };
         command.args(["--expr", "{ flake, directory, options }: (builtins.getFlake flake).lib.mkJsPackage ((builtins.fromJSON options) // { system = builtins.currentSystem; src = /. + directory; })", "--argstr", "flake"]).arg(flake);
     }
-    let mut options = serde_json::to_value(&project.options)?;
+    let mut options = project.options.to_value();
     options["dependenciesOnly"] = quiet.into();
     command
         .args(["--argstr", "directory"])
@@ -110,7 +96,7 @@ fn realize(project: &Project, graph: &Path, link: Option<&Path>, quiet: bool) ->
 }
 
 pub(crate) fn build(project: &Project, out: Option<&Path>) -> Result<()> {
-    let temp = tempfile::tempdir()?;
+    let temp = crate::temp::tempdir()?;
     let graph = temp.path().join("export");
     let root = project.directory.canonicalize()?;
     let link = out.map(|o| root.join(o));
@@ -120,7 +106,7 @@ pub(crate) fn build(project: &Project, out: Option<&Path>) -> Result<()> {
 
 impl Execution {
     pub fn run(&self, script: &str) -> Result<()> {
-        let temp = tempfile::tempdir()?;
+        let temp = crate::temp::tempdir()?;
         let graph = temp.path().join("export");
         let installation = temp.path().join("installation");
         let sources = temp.path().join("sources");
@@ -143,7 +129,7 @@ pub(crate) fn run_script(
     script: &str,
     args: &[OsString],
 ) -> Result<()> {
-    let temp = tempfile::tempdir()?;
+    let temp = crate::temp::tempdir()?;
     let work = temp.path().join("project");
     dependency_layer::materialize(source, layer, &work)?;
     let directory = work.join(native_store::safe_relative(

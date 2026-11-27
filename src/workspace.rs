@@ -631,8 +631,8 @@ mod tests {
 #[cfg(test)]
 mod closure_tests {
     use super::*;
-    fn fixture() -> (tempfile::TempDir, Value) {
-        let root = tempfile::tempdir().unwrap();
+    fn fixture() -> (crate::temp::TempDir, Value) {
+        let root = crate::temp::tempdir().unwrap();
         for (path, name) in [
             (".", "root"),
             ("packages/a", "@test/a"),
@@ -760,7 +760,7 @@ mod closure_tests {
     }
     #[test]
     fn relative_staging_inside_root_is_excluded() {
-        let root = tempfile::tempdir_in(".").unwrap();
+        let root = crate::temp::tempdir_in(".").unwrap();
         fs::write(root.path().join("package.json"), "{\"name\":\"root\"}").unwrap();
         fs::write(root.path().join("pnpm-workspace.yaml"), "packages: []\n").unwrap();
         let canonical = root.path().canonicalize().unwrap();

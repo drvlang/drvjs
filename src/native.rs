@@ -1,8 +1,10 @@
 //! Native assembly for the pinned pnpm isolated node_modules layout.
-use crate::native_store as store;
+use crate::{
+    hash::{Sha256, base64_encode, hex_encode},
+    native_store as store, temp,
+};
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     fs,
@@ -47,7 +49,7 @@ pub fn filename(id: &str) -> String {
         s = format!(
             "{}_{}",
             &s[..s.len().min(87)],
-            &format!("{:x}", Sha256::digest(s.as_bytes()))[..32]
+            &hex_encode(&Sha256::digest(s.as_bytes()))[..32]
         );
     }
     s
@@ -126,21 +128,44 @@ fn link(target: &Path, path: &Path) -> Result<()> {
         Err(error) => Err(error.into()),
     }
 }
-struct HoistPatterns(Vec<(bool, regex::Regex)>);
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0, 0);
+    let (mut star_p, mut star_t) = (None, 0);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star_p = Some(pi);
+            pi += 1;
+            star_t = ti;
+        } else if let Some(sp) = star_p {
+            pi = sp + 1;
+            star_t += 1;
+            ti = star_t;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+struct HoistPatterns(Vec<(bool, String)>);
 impl HoistPatterns {
     fn new(patterns: &[String]) -> Self {
         Self(
             patterns
                 .iter()
                 .map(|p| {
-                    let (neg, p) = p
+                    let (neg, pat) = p
                         .strip_prefix('!')
                         .map_or((false, p.as_str()), |s| (true, s));
-                    let re = format!(
-                        "^{}$",
-                        regex::escape(p).replace("\\*", ".*").replace("\\?", ".")
-                    );
-                    (neg, regex::Regex::new(&re).unwrap())
+                    (neg, pat.to_owned())
                 })
                 .collect(),
         )
@@ -148,7 +173,7 @@ impl HoistPatterns {
     fn matches(&self, alias: &str) -> bool {
         let mut matched = false;
         for (neg, pattern) in &self.0 {
-            if pattern.is_match(alias) {
+            if glob_match(pattern, alias) {
                 if *neg {
                     return false;
                 }
@@ -268,37 +293,76 @@ fn settings(root: &Path) -> Result<(Value, Value, BTreeMap<String, String>)> {
 fn ranges_intersect(a: &str, b: &str) -> bool {
     a.is_empty()
         || a == b
-        || match (node_semver::Range::parse(a), node_semver::Range::parse(b)) {
+        || match (
+            crate::semver::Range::parse(a),
+            crate::semver::Range::parse(b),
+        ) {
             (Ok(a), Ok(b)) => a.allows_any(&b),
             _ => false,
         }
+}
+fn parse_parent_selector(selector: &str) -> Option<(&str, Option<&str>, &str)> {
+    let (left, right) = selector.split_once('>')?;
+    if right.is_empty() || right.starts_with('=') {
+        return None;
+    }
+    let (name, range) = if let Some(scoped) = left.strip_prefix('@') {
+        let slash = scoped.find('/')?;
+        let after_slash = &scoped[slash + 1..];
+        if after_slash.is_empty() {
+            return None;
+        }
+        match after_slash.find('@') {
+            Some(at) => {
+                let split = 1 + slash + 1 + at;
+                let r = &left[split + 1..];
+                if r.is_empty() {
+                    return None;
+                }
+                (&left[..split], Some(r))
+            }
+            None => (left, None),
+        }
+    } else {
+        if left.is_empty() {
+            return None;
+        }
+        match left.find('@') {
+            Some(0) => return None,
+            Some(at) => {
+                let r = &left[at + 1..];
+                if r.is_empty() {
+                    return None;
+                }
+                (&left[..at], Some(r))
+            }
+            None => (left, None),
+        }
+    };
+    Some((name, range, right))
 }
 fn override_spec(manifest: &Value, alias: &str, spec: &str, lock: &Value) -> String {
     let mut generic = Vec::new();
     let mut specific = Vec::new();
     if let Some(overrides) = lock["overrides"].as_object() {
-        static PARENT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"^(@[^/]+/[^@>]+|[^@>]+)(?:@([^>]+))?>([^=].*)$").unwrap()
-        });
-        let parent_re = &*PARENT;
         for (selector, replacement) in overrides {
             let mut target = selector.as_str();
             let mut parent = false;
-            if let Some(c) = parent_re.captures(selector) {
-                if manifest["name"].as_str() != Some(&c[1]) {
+            if let Some((parent_name, parent_range, child)) = parse_parent_selector(selector) {
+                if manifest["name"].as_str() != Some(parent_name) {
                     continue;
                 }
-                if let Some(range) = c.get(2) {
+                if let Some(range) = parent_range {
                     let matches = manifest["version"]
                         .as_str()
-                        .and_then(|v| node_semver::Version::parse(v).ok())
-                        .zip(node_semver::Range::parse(range.as_str()).ok())
+                        .and_then(|v| crate::semver::Version::parse(v).ok())
+                        .zip(crate::semver::Range::parse(range).ok())
                         .is_some_and(|(v, r)| r.satisfies(&v));
                     if !matches {
                         continue;
                     }
                 }
-                target = c.get(3).unwrap().as_str();
+                target = child;
                 parent = true;
             }
             let (package, range) = target[1..]
@@ -384,12 +448,8 @@ fn validate(root: &Path, lock: &Value) -> Result<()> {
         }
     }
     if root.join(".pnpmfile.cjs").exists() {
-        use base64::Engine;
         let bytes = fs::read_to_string(root.join(".pnpmfile.cjs"))?.replace("\r\n", "\n");
-        let hash = format!(
-            "sha256-{}",
-            base64::engine::general_purpose::STANDARD.encode(Sha256::digest(bytes.as_bytes()))
-        );
+        let hash = format!("sha256-{}", base64_encode(&Sha256::digest(bytes.as_bytes())));
         ensure!(
             lock["pnpmfileChecksum"].as_str() == Some(&hash),
             "ERR_PNPM_LOCKFILE_CONFIG_MISMATCH: hook checksum differs"
@@ -469,6 +529,15 @@ pub fn target_packages(source: &Path, lock: &Value) -> Result<BTreeMap<String, B
     Ok(targets)
 }
 
+fn resolve_input_path(path: &Path) -> Result<PathBuf> {
+    if let Some(var) = path.to_str().and_then(|s| s.strip_prefix("@env:")) {
+        return Ok(PathBuf::from(
+            std::env::var(var).with_context(|| format!("missing env var {var}"))?,
+        ));
+    }
+    Ok(path.to_path_buf())
+}
+
 pub fn assemble(
     source: &Path,
     out: &Path,
@@ -481,7 +550,9 @@ pub fn assemble(
         package_contents.is_none() || (!keep && cache.is_none()),
         "package contents cannot be combined with pnpm verification stores"
     );
+    let package_contents = package_contents.map(resolve_input_path).transpose()?;
     let contents = package_contents
+        .as_deref()
         .map(crate::package_cache::Contents::load)
         .transpose()?;
     let phase = std::time::Instant::now();
@@ -510,13 +581,17 @@ pub fn assemble(
         arch => arch,
     };
     let skipped = skipped_packages(&lock, &settings, arch)?;
-    let scratch = tempfile::tempdir_in(&out)?;
+    let scratch = temp::tempdir_in(&out)?;
     let local_store = scratch.path().join("store");
     let cache = cache
         .map(Path::to_path_buf)
         .unwrap_or_else(|| local_store.clone());
     let sources: Vec<Value> = if cache == local_store && contents.is_none() {
-        serde_json::from_slice(&fs::read(tarballs)?)?
+        if tarballs == Path::new("@empty") {
+            Vec::new()
+        } else {
+            serde_json::from_slice(&fs::read(resolve_input_path(tarballs)?)?)?
+        }
     } else {
         Vec::new()
     };
@@ -607,8 +682,17 @@ pub fn assemble(
                 Some(
                     prepared
                         .as_str()
-                        .context("invalid prepared archive integrity")?,
+                        .context("invalid prepared archive integrity")?
+                        .to_owned(),
                 )
+            } else if let Some(integrity_file) =
+                source.get("integrityFile").and_then(Value::as_str)
+            {
+                ensure!(
+                    source["sourceIntegrity"].as_str() == Some(integrity),
+                    "prepared source integrity mismatch: {id}"
+                );
+                Some(fs::read_to_string(integrity_file)?.trim().to_owned())
             } else {
                 None
             };
@@ -617,7 +701,7 @@ pub fn assemble(
                 target,
                 id,
                 integrity,
-                prepared,
+                prepared.as_deref(),
                 direct,
                 // A retained pnpm store must stay complete enough to seed this
                 // same exported lockfile, which may omit the learned constraints.
@@ -1096,6 +1180,33 @@ fn write_state(
         &json!({"filteredInstall":false,"lastValidatedTimestamp":0,"pnpmfiles":hooks,"projects":project_state,"settings":settings}),
     )
 }
+fn parse_shebang(line: &str) -> Option<(&str, &str)> {
+    let rest = line.strip_prefix("#!")?.trim_start();
+    let rest = if let Some(after_env) = rest.strip_prefix("/usr/bin/env") {
+        if after_env.is_empty() {
+            rest
+        } else if after_env.starts_with(char::is_whitespace) {
+            let after_ws = after_env.trim_start();
+            if let Some(after_s) = after_ws.strip_prefix("-S")
+                && (after_s.is_empty() || after_s.starts_with(char::is_whitespace))
+            {
+                after_s.trim_start()
+            } else {
+                after_ws
+            }
+        } else {
+            rest
+        }
+    } else {
+        rest
+    };
+    if rest.is_empty() {
+        return None;
+    }
+    let end = rest.find([' ', '\t']).unwrap_or(rest.len());
+    Some((rest[..end].trim(), rest[end..].trim()))
+}
+
 fn link_bins(
     root: &Path,
     bin: &Path,
@@ -1104,10 +1215,6 @@ fn link_bins(
     manifests: &mut BTreeMap<PathBuf, std::sync::Arc<Value>>,
 ) -> Result<()> {
     let mut used = BTreeMap::new();
-    static SHEBANG: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"^#!\s*(?:/usr/bin/env(?:\s+-S\s*)?)?\s*([^ \t]+)(.*)$").unwrap()
-    });
-    let shebang = &*SHEBANG;
     for target in targets {
         let manifest = manifests.entry(target.clone()).or_insert_with(|| {
             std::sync::Arc::new(read_json(&target.join("package.json")).unwrap_or(Value::Null))
@@ -1146,7 +1253,7 @@ fn link_bins(
             let priority = (
                 name == package_name,
                 package_name.to_owned(),
-                node_semver::Version::parse(manifest["version"].as_str().unwrap_or("0.0.0")).ok(),
+                crate::semver::Version::parse(manifest["version"].as_str().unwrap_or("0.0.0")).ok(),
             );
             if used.get(&name).is_some_and(|old| old >= &priority) {
                 continue;
@@ -1166,9 +1273,9 @@ fn link_bins(
             );
             let first = std::str::from_utf8(content.split(|b| *b == b'\n').next().unwrap_or(&[]))
                 .unwrap_or("");
-            let runtime = shebang.captures(first.trim());
-            let interpreter = runtime.as_ref().map(|c| c[1].trim()).unwrap_or("");
-            let args = runtime.as_ref().map(|c| c[2].trim()).unwrap_or("");
+            let runtime = parse_shebang(first.trim());
+            let interpreter = runtime.map(|(i, _)| i).unwrap_or("");
+            let args = runtime.map(|(_, a)| a).unwrap_or("");
             ensure!(
                 !interpreter.contains(['\n', '\r', '"', '`', '$'])
                     && !args.contains(['\n', '\r', '"', '`', '$', ';', '&', '|', '<', '>']),
@@ -1248,7 +1355,7 @@ mod tests {
 
     #[test]
     fn dependency_links_preserve_existing_files_and_dangling_links() {
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         let path = root.path().join("nested/dependency");
         link(&root.path().join("missing"), &path).unwrap();
         assert_eq!(fs::read_link(&path).unwrap(), Path::new("../missing"));
@@ -1292,7 +1399,7 @@ mod tests {
         lock["snapshots"]["arm-only@1.0.0"] =
             json!({"dependencies":{"child":"1.0.0(patch_hash=abc)"}});
         lock["snapshots"]["child@1.0.0(patch_hash=abc)"] = json!({});
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         fs::write(root.path().join("package.json"), "{\"name\":\"targets\"}").unwrap();
         let targets = target_packages(root.path(), &lock).unwrap();
         assert_eq!(
@@ -1325,7 +1432,7 @@ mod tests {
 
     #[test]
     fn bins_prefer_the_package_own_name_and_preserve_interpreters() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = temp::tempdir().unwrap();
         let mut targets = Vec::new();
         for (directory, package, body) in [
             ("other", "@scope/other", "#!/usr/bin/env node\n"),
@@ -1351,7 +1458,7 @@ mod tests {
 
     #[test]
     fn frozen_validation_uses_dependency_section_precedence() {
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         for spec in ["1.0.0", "workspace:*"] {
             for winner in ["dependencies", "optionalDependencies"] {
                 let mut manifest = json!({"name":"app", "dependencies":{"example":spec}, "devDependencies":{"example":"shadowed"}});
@@ -1374,7 +1481,7 @@ mod tests {
 
     #[test]
     fn removed_manifest_dependency_is_rejected() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = temp::tempdir().unwrap();
         store::write_json(&dir.path().join("package.json"), &json!({"name":"app"})).unwrap();
         let lock = json!({"importers":{".":{"dependencies":{"gone":{"specifier":"1.0.0","version":"1.0.0"}}}}});
         assert!(

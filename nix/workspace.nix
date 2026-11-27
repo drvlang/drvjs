@@ -88,7 +88,9 @@ let
     ancestors = p: if p == "." then [] else [ p ] ++ ancestors (dirOf p);
     importerDirs = lib.genAttrs (lib.concatMap ancestors paths) (_: true);
     metadata = lib.genAttrs (lib.concatMap (p: [ "${p}/package.json" "${p}/.npmrc" "${p}/.pnpmfile.cjs" ]) paths) (_: true);
+  hasPatches = has "patchedDependencies" document;
   in {
+    inherit hasPatches;
     primary = if chosen == [] then "." else builtins.head chosen;
     src = lib.cleanSourceWith {
       name = "js-source"; inherit src;

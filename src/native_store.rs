@@ -1,8 +1,11 @@
 //! pnpm v10 CAFS reader/writer. No pnpm process participates in assembly.
+use crate::{
+    compress,
+    hash::{Sha256, Sha384, Sha512, base64_decode, base64_encode},
+    temp,
+};
 use anyhow::{Context, Result, ensure};
-use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::{
     collections::BTreeMap,
     fs,
@@ -32,7 +35,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 pub fn sri_hex(integrity: &str) -> Result<String> {
     let (alg, encoded) = integrity.split_once('-').context("invalid integrity")?;
-    let bytes = STANDARD.decode(encoded)?;
+    let bytes = base64_decode(encoded)?;
     ensure!(
         matches!(
             (alg, bytes.len()),
@@ -82,7 +85,7 @@ pub fn write_json(path: &Path, value: &Value) -> Result<()> {
     Ok(())
 }
 fn save_file(store: &Path, bytes: &[u8], mode: u32) -> Result<Value> {
-    let info = json!({"integrity":format!("sha512-{}", STANDARD.encode(Sha512::digest(bytes))),"mode":mode,"size":bytes.len()});
+    let info = json!({"integrity":format!("sha512-{}", base64_encode(&Sha512::digest(bytes))),"mode":mode,"size":bytes.len()});
     let path = content_path(store, &info)?;
     // Parallel tarball extraction can encounter identical content. Publish each
     // file completely before another package can reuse it.
@@ -199,14 +202,13 @@ fn unpack_impl(
     };
     ensure!(actual == expected, "tarball integrity mismatch: {id}");
     if archive_integrity.is_some() {
-        let size = zstd::zstd_safe::get_frame_content_size(&bytes)
-            .map_err(|_| anyhow::anyhow!("invalid zstd frame"))?;
+        let size = compress::zstd_frame_content_size(&bytes)?;
         if let Some(size) = size.filter(|size| *size <= 256 * 1024 * 1024) {
-            let output = zstd::bulk::decompress(&bytes, size as usize)?;
+            let output = compress::zstd_decompress(&bytes, size as usize)?;
             return extract_raw(&output, store, id, integrity, direct, accept);
         }
         return extract_stream(
-            || Ok(zstd::stream::read::Decoder::new(bytes.as_slice())?),
+            || compress::ZstdDecoder::new(bytes.as_slice()),
             store,
             id,
             integrity,
@@ -214,19 +216,12 @@ fn unpack_impl(
             accept,
         );
     }
-    // Decode ordinary gzip archives in one bounded buffer. Larger or unusual
-    // streams use the existing streaming decoder. SRI is verified above.
+    // Decode ordinary gzip archives in one bounded buffer via libz. Larger or
+    // unusual streams use the streaming decoder. SRI is verified above.
     let expanded = if bytes.starts_with(&[0x1f, 0x8b]) && bytes.len() >= 18 {
         let size = u32::from_le_bytes(bytes[bytes.len() - 4..].try_into().unwrap()) as usize;
         if size <= 256 * 1024 * 1024 {
-            let mut output = vec![0; size];
-            match libdeflater::Decompressor::new().gzip_decompress(&bytes, &mut output) {
-                Ok(size) => {
-                    output.truncate(size);
-                    Some(output)
-                }
-                Err(_) => None,
-            }
+            compress::gzip_decompress(&bytes, size).ok()
         } else {
             None
         }
@@ -240,7 +235,7 @@ fn unpack_impl(
         return extract_raw(&bytes, store, id, integrity, direct, accept);
     }
     extract_stream(
-        || Ok(flate2::read::GzDecoder::new(bytes.as_slice())),
+        || compress::GzDecoder::new(bytes.as_slice()),
         store,
         id,
         integrity,
@@ -549,7 +544,7 @@ pub fn make_executable(path: &Path) -> Result<()> {
     if mode & 0o111 == 0o111 {
         return Ok(());
     }
-    let temp = tempfile::NamedTempFile::new_in(path.parent().context("bin missing parent")?)?;
+    let temp = temp::NamedTempFile::new_in(path.parent().context("bin missing parent")?)?;
     fs::copy(path, temp.path())?;
     fs::set_permissions(temp.path(), fs::Permissions::from_mode(mode | 0o111))?;
     temp.persist(path)?;
@@ -577,7 +572,7 @@ fn apply_patch(
     );
     // pnpm's patch parser accepts a missing final newline; git apply requires
     // one. This framing change does not change patch contents or the hash check.
-    let prepared = tempfile::NamedTempFile::new()?;
+    let prepared = temp::NamedTempFile::new()?;
     fs::write(
         prepared.path(),
         if text.ends_with('\n') {
@@ -676,7 +671,7 @@ mod tests {
 
     #[test]
     fn optional_manifest_filter_checks_integrity_before_skipping_and_never_writes_rejected_files() {
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         let mut archive = tar::Builder::new(Vec::new());
         // Put the manifest last, as binary packages commonly do.
         for (name, bytes) in [
@@ -695,15 +690,15 @@ mod tests {
                 .unwrap();
         }
         let tar = archive.into_inner().unwrap();
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        let mut encoder = compress::GzEncoder::new(Vec::new(), 1);
         std::io::Write::write_all(&mut encoder, &tar).unwrap();
         let gzip = encoder.finish().unwrap();
-        let zstd = zstd::bulk::compress(&tar, 1).unwrap();
+        let zstd = compress::zstd_compress(&tar, 1).unwrap();
         let reject = |manifest: &Value| manifest["libc"] != json!(["musl"]);
         for (i, bytes) in [&tar, &gzip, &zstd].into_iter().enumerate() {
             let path = root.path().join(format!("archive-{i}"));
             fs::write(&path, bytes).unwrap();
-            let sri = format!("sha512-{}", STANDARD.encode(Sha512::digest(bytes)));
+            let sri = format!("sha512-{}", base64_encode(&Sha512::digest(bytes)));
             let prepared = if i == 2 { Some(sri.as_str()) } else { None };
             let target = root.path().join(format!("rejected-{i}"));
             let index = unpack_filtered(
@@ -748,7 +743,7 @@ mod tests {
             );
         }
         let streaming = root.path().join("streaming");
-        let reader = || Ok(flate2::read::GzDecoder::new(gzip.as_slice()));
+        let reader = || compress::GzDecoder::new(gzip.as_slice());
         extract_stream(
             reader,
             &streaming,
@@ -834,12 +829,12 @@ mod tests {
     #[test]
     fn memory_and_streaming_extraction_agree_on_extended_paths_and_modes() {
         use std::io::Write;
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         let raw = archive_fixture();
-        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut gzip = compress::GzEncoder::new(Vec::new(), 6);
         gzip.write_all(&raw).unwrap();
         let gzip = gzip.finish().unwrap();
-        let integrity = format!("sha512-{}", STANDARD.encode(Sha512::digest(&gzip)));
+        let integrity = format!("sha512-{}", base64_encode(&Sha512::digest(&gzip)));
         let archive = root.path().join("archive.tgz");
         fs::write(&archive, &gzip).unwrap();
         let fast = root.path().join("fast");
@@ -849,7 +844,7 @@ mod tests {
         assert!(!fast.join("ignored-link").exists());
         assert_eq!(fs::read(fast.join("lib/pax name.js")).unwrap(), b"pax");
         let stream = root.path().join("stream");
-        let mut reader = tar::Archive::new(flate2::read::GzDecoder::new(gzip.as_slice()));
+        let mut reader = tar::Archive::new(compress::GzDecoder::new(gzip.as_slice()).unwrap());
         extract_entries(
             reader.entries().unwrap(),
             None,
@@ -868,22 +863,22 @@ mod tests {
     }
     #[test]
     fn prepared_archives_preserve_source_indexes_and_reject_corruption() {
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         let raw = archive_fixture();
         let source_integrity = format!(
             "sha512-{}",
-            STANDARD.encode(Sha512::digest(b"original gzip"))
+            base64_encode(&Sha512::digest(b"original gzip"))
         );
         let mut reference = None;
         for (label, mut bytes) in [
-            ("sized", zstd::bulk::compress(&raw, 1).unwrap()),
+            ("sized", compress::zstd_compress(&raw, 1).unwrap()),
             (
                 "stream",
-                zstd::stream::encode_all(raw.as_slice(), 1).unwrap(),
+                compress::zstd_compress_stream(&raw, 1).unwrap(),
             ),
         ] {
             let archive = root.path().join(format!("{label}.zst"));
-            let integrity = format!("sha512-{}", STANDARD.encode(Sha512::digest(&bytes)));
+            let integrity = format!("sha512-{}", base64_encode(&Sha512::digest(&bytes)));
             fs::write(&archive, &bytes).unwrap();
             let direct = root.path().join(format!("{label}-direct"));
             unpack_prepared(
@@ -954,10 +949,10 @@ mod tests {
         }
         let mut bytes = archive.into_inner().unwrap();
         bytes.truncate(512 * 3 + 2);
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         let input = root.path().join("archive.tar");
         fs::write(&input, &bytes).unwrap();
-        let integrity = format!("sha512-{}", STANDARD.encode(Sha512::digest(&bytes)));
+        let integrity = format!("sha512-{}", base64_encode(&Sha512::digest(&bytes)));
         let out = root.path().join("out");
         let error = unpack_to(&input, &out, "test@1.0.0", &integrity).unwrap_err();
         assert!(error.to_string().contains("truncated tar entry"));
@@ -967,7 +962,7 @@ mod tests {
     #[test]
     fn shared_files_detach_before_bin_permissions_change() {
         use std::os::unix::fs::MetadataExt;
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         let store = root.path().join("store");
         let info = save_file(&store, b"#!/usr/bin/env node\n", 0o644).unwrap();
         let index = json!({"files":{"bin.js":info}});
@@ -1001,7 +996,7 @@ mod tests {
 
     #[test]
     fn cached_patch_accepts_preimages_or_postimages_and_ignores_side_effects() {
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         let cache = root.path().join("cache");
         let original = save_file(&cache, b"before\n", 0o644).unwrap();
         let patched = save_file(&cache, b"after\n", 0o644).unwrap();
@@ -1045,7 +1040,7 @@ mod tests {
 
     #[test]
     fn patch_checks_complete_preimages_and_postimages_without_partial_writes() {
-        let root = tempfile::tempdir().unwrap();
+        let root = temp::tempdir().unwrap();
         let original = "A\nbefore-one\nC\nD\nE\nF\nG\nbefore-two\nI\n";
         let complete = original
             .replace("before-one", "after-one")
@@ -1121,7 +1116,7 @@ mod tests {
 
     #[test]
     fn materialization_rejects_corrupt_cached_content() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = temp::tempdir().unwrap();
         let info = save_file(dir.path(), b"original", 0o644).unwrap();
         let index = json!({"files":{"file":info}});
         fs::write(
@@ -1136,7 +1131,7 @@ mod tests {
 
     #[test]
     fn cached_corruption_is_rejected_without_modifying_cache() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = temp::tempdir().unwrap();
         let info = save_file(dir.path(), b"original", 0o644).unwrap();
         let index = json!({"files": {"package.json": info}});
         verify_indexes(dir.path(), &BTreeMap::from([("pkg".into(), index.clone())])).unwrap();
@@ -1150,10 +1145,10 @@ mod tests {
 
     #[test]
     fn archive_integrity_is_checked_before_unpacking() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = temp::tempdir().unwrap();
         let archive = dir.path().join("archive");
         fs::write(&archive, b"wrong archive").unwrap();
-        let integrity = format!("sha512-{}", STANDARD.encode(Sha512::digest(b"expected")));
+        let integrity = format!("sha512-{}", base64_encode(&Sha512::digest(b"expected")));
         let error =
             unpack(&archive, &dir.path().join("store"), "pkg@1.0.0", &integrity).unwrap_err();
         assert!(error.to_string().contains("integrity mismatch"));

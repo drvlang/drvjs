@@ -1,7 +1,6 @@
-use crate::pnpm;
+use crate::{hash::Sha256, pnpm, temp};
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs,
@@ -93,7 +92,7 @@ pub fn verify(directory: &Path, external_store: Option<&Path>) -> Result<()> {
         source.is_dir(),
         "verification store is not retained in this output; rebuild an export made with --keep-verification-store, use nix-build EXPORT --arg keepVerificationStore true, or supply --store PATH"
     );
-    let tmp = tempfile::tempdir()?;
+    let tmp = temp::tempdir()?;
     crate::workspace::copy_tree(&directory, tmp.path())?;
     let store = tmp.path().join(".pnpm-store");
     for entry in WalkDir::new(&source) {
@@ -121,7 +120,7 @@ pub fn verify(directory: &Path, external_store: Option<&Path>) -> Result<()> {
     // Shared installations intentionally have external instance directories.
     // Expand only the links described by their format, then run the same full
     // byte/mode/link comparison. Internal package links are never followed.
-    let materialized = tempfile::tempdir()?;
+    let materialized = temp::tempdir()?;
     let actual = if crate::shared_store::root(&directory)?.is_some() {
         let expanded = materialized.path().join("installation");
         crate::dependency_layer::materialize(&directory, &directory, &expanded)?;
